@@ -11,6 +11,7 @@ class AnimationFrame {
   /// Duration of this frame in milliseconds.
   final int duration;
 
+  /// Creates an animation frame with the given [tileId] and [duration] in milliseconds.
   const AnimationFrame({required this.tileId, required this.duration});
 }
 

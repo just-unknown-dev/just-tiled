@@ -3,12 +3,12 @@ library;
 
 import 'dart:ui';
 
-/// Typed custom properties from Tiled's <properties> tags.
+/// Typed custom properties from Tiled's properties tags.
 class TiledProperties {
   final Map<String, dynamic> _values;
 
   const TiledProperties([Map<String, dynamic>? values])
-      : _values = values ?? const {};
+    : _values = values ?? const {};
 
   /// All property keys.
   Iterable<String> get keys => _values.keys;

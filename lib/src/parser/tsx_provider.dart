@@ -11,7 +11,7 @@ import 'package:flutter/services.dart' show rootBundle;
 abstract class TsxProvider {
   /// Resolve and load an external .tsx tileset file.
   ///
-  /// [source] is the path/URI as written in the TMX <tileset> element's
+  /// [source] is the path/URI as written in the TMX tileset element's
   /// `source` attribute.
   ///
   /// Returns the raw XML string content of the .tsx file.
@@ -19,7 +19,7 @@ abstract class TsxProvider {
 
   /// Resolve and load an external .tx template file.
   ///
-  /// [source] is the path/URI as written in the <object> element's
+  /// [source] is the path/URI as written in the object element's
   /// `template` attribute.
   ///
   /// Returns the raw XML string content of the .tx file.
