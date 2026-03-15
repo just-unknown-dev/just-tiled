@@ -1,0 +1,24 @@
+name: just_tiled
+description: "Tiled Map Editor (TMX/TSX) parser and renderer for 2D game engines."
+version: 0.1.0
+homepage: https://github.com/just-unknown-dev/just-tiled
+repository: https://github.com/just-unknown-dev/just-tiled
+issue_tracker: https://github.com/just-unknown-dev/just-tiled/issues
+
+environment:
+  sdk: ^3.11.0
+  flutter: ">=1.17.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  xml: ^6.5.0
+  archive: ^4.0.4
+  just_zstd: ^0.1.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
