@@ -1,6 +1,10 @@
 # Changelog
 
-All notable changes to `just_tiled` will be documented in this file.
+## [0.2.0] - 2026-03-15
+
+### Added
+- **Example** (`example/example.dart`) — full Flutter app demonstrating map parsing, texture atlas construction, `TileMapRenderer` usage, object querying, custom property access, and 
+---
 
 ## [0.1.0] - 2026-03-15
 

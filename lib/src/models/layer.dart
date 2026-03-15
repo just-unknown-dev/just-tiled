@@ -136,6 +136,7 @@ class ImageLayer extends Layer {
   /// Transparent color key.
   final Color? transparentColor;
 
+  /// Creates an image layer.
   const ImageLayer({
     required super.id,
     super.name,
@@ -157,6 +158,7 @@ class GroupLayer extends Layer {
   /// Child layers.
   final List<Layer> layers;
 
+  /// Creates a group layer with optional [layers] as children.
   const GroupLayer({
     required super.id,
     super.name,

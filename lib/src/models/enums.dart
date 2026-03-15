@@ -65,9 +65,14 @@ enum DrawOrder {
   topDown('topdown'),
   index_('index');
 
+  /// The TMX attribute string used to represent this draw order in `.tmx` files.
   final String tmxValue;
+
   const DrawOrder(this.tmxValue);
 
+  /// Parses a TMX `draworder` attribute [value] into a [DrawOrder].
+  ///
+  /// Defaults to [DrawOrder.topDown] for any unrecognised value.
   static DrawOrder fromString(String value) {
     return DrawOrder.values.firstWhere(
       (e) => e.tmxValue == value,
