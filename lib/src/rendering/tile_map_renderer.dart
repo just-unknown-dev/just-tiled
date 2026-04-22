@@ -93,62 +93,75 @@ class TileMapRenderer {
       final pos = _tileToWorld(col, row);
 
       // Handle flip flags
-      final flipH = i < tileLayer.flipHorizontal.length &&
-          tileLayer.flipHorizontal[i];
-      final flipV = i < tileLayer.flipVertical.length &&
-          tileLayer.flipVertical[i];
-      final flipD = i < tileLayer.flipDiagonal.length &&
-          tileLayer.flipDiagonal[i];
+      final flipH =
+          i < tileLayer.flipHorizontal.length && tileLayer.flipHorizontal[i];
+      final flipV =
+          i < tileLayer.flipVertical.length && tileLayer.flipVertical[i];
+      final flipD =
+          i < tileLayer.flipDiagonal.length && tileLayer.flipDiagonal[i];
 
-      // Build RSTransform
       // RSTransform encodes: scos, ssin, tx, ty
-      // where the transform matrix is:
-      //   [scos, -ssin, tx]
-      //   [ssin,  scos, ty]
+      // RSTransform only supports rotation + uniform scale, so independent
+      // H/V flips are implemented by inverting source-rect coordinates.
+      // flipD combinations encode 90° rotations handled via RSTransform.
       double scos = 1.0;
       double ssin = 0.0;
       double tx = pos.dx;
       double ty = pos.dy;
 
+      // Source rect corners — inverted axes produce a mirror on the GPU.
+      double srcL = sourceRect.left;
+      double srcT = sourceRect.top;
+      double srcR = sourceRect.right;
+      double srcB = sourceRect.bottom;
+
+      final tw = map.tileWidth.toDouble();
+
       if (flipD) {
-        // Anti-diagonal flip = rotate 90° + flip horizontal
-        // rotation = 90° → scos=0, ssin=1
-        final tileW = map.tileWidth.toDouble();
-        scos = 0.0;
-        ssin = 1.0;
-        tx += tileW;
-        if (!flipH) {
-          // Also flip vertical after rotation
+        // Tiled spec: D+H = 90° CW, D+V = 90° CCW, D alone = transpose
+        // (= 90° CW + H-src-flip), D+H+V = 90° CW + V-src-flip.
+        if (flipH && flipV) {
+          // 90° clockwise + vertical source flip
+          scos = 0.0;
           ssin = -1.0;
-          tx -= tileW;
-          ty += map.tileHeight.toDouble();
+          tx = pos.dx;
+          ty = pos.dy + tw;
+          final tmp = srcT;
+          srcT = srcB;
+          srcB = tmp;
+        } else if (flipH) {
+          // 90° clockwise rotation
+          scos = 0.0;
+          ssin = -1.0;
+          tx = pos.dx;
+          ty = pos.dy + tw;
+        } else if (flipV) {
+          // 90° counter-clockwise rotation
+          scos = 0.0;
+          ssin = 1.0;
+          tx = pos.dx + tw;
+          ty = pos.dy;
+        } else {
+          // Transpose: 90° clockwise + horizontal source flip
+          scos = 0.0;
+          ssin = -1.0;
+          tx = pos.dx;
+          ty = pos.dy + tw;
+          final tmp = srcL;
+          srcL = srcR;
+          srcR = tmp;
         }
       } else {
+        // Pure H/V — invert source rect axes; RSTransform stays identity.
         if (flipH) {
-          scos = -1.0;
-          tx += map.tileWidth.toDouble();
+          final tmp = srcL;
+          srcL = srcR;
+          srcR = tmp;
         }
         if (flipV) {
-          // Flip vertical: negate scos for Y, shift ty
-          if (flipH) {
-            // Both flips = 180° rotation
-            scos = -1.0;
-            ssin = 0.0; // unused in this context
-            // Adjust: use actual rotation
-            scos = -1.0;
-            tx = pos.dx + map.tileWidth.toDouble();
-            ty = pos.dy + map.tileHeight.toDouble();
-          } else {
-            // Vertical flip only — use RSTransform scale trick
-            // RSTransform doesn't natively support non-uniform scale,
-            // so we simulate with rotation + flip:
-            // flipV = mirror over X axis → negate Y scale
-            // We'll use a small workaround: 180° rotation + flipH
-            scos = -1.0;
-            ssin = 0.0;
-            tx = pos.dx + map.tileWidth.toDouble();
-            ty = pos.dy + map.tileHeight.toDouble();
-          }
+          final tmp = srcT;
+          srcT = srcB;
+          srcB = tmp;
         }
       }
 
@@ -159,15 +172,18 @@ class TileMapRenderer {
       _transforms![tIdx + 2] = tx;
       _transforms![tIdx + 3] = ty;
 
-      // Write source Rect: [left, top, right, bottom]
-      _rects![tIdx] = sourceRect.left;
-      _rects![tIdx + 1] = sourceRect.top;
-      _rects![tIdx + 2] = sourceRect.right;
-      _rects![tIdx + 3] = sourceRect.bottom;
+      // Write source rect (potentially with inverted axes for flips)
+      _rects![tIdx] = srcL;
+      _rects![tIdx + 1] = srcT;
+      _rects![tIdx + 2] = srcR;
+      _rects![tIdx + 3] = srcB;
 
       idx++;
     }
 
+    // Use the actual compiled count in case atlas.containsGid and
+    // getSourceRect() predicates diverge (e.g. in subclasses).
+    _tileCount = idx;
     _dirty = false;
   }
 
@@ -176,7 +192,11 @@ class TileMapRenderer {
   /// [canvas] is the Flutter canvas.
   /// [cameraOffset] is the camera's world-space position.
   /// [visibleBounds] is the visible world-space rectangle (for culling).
-  void render(ui.Canvas canvas, ui.Offset cameraOffset, ui.Rect? visibleBounds) {
+  void render(
+    ui.Canvas canvas,
+    ui.Offset cameraOffset,
+    ui.Rect? visibleBounds,
+  ) {
     if (_dirty) compile();
     if (_transforms == null || _rects == null || _tileCount == 0) return;
 
@@ -234,10 +254,21 @@ class TileMapRenderer {
 
     switch (map.orientation) {
       case MapOrientation.orthogonal:
-        startCol = ((visibleBounds.left - tileLayer.offsetX) / tw).floor().clamp(0, tileLayer.width - 1);
-        endCol = ((visibleBounds.right - tileLayer.offsetX) / tw).ceil().clamp(0, tileLayer.width - 1);
-        startRow = ((visibleBounds.top - tileLayer.offsetY) / th).floor().clamp(0, tileLayer.height - 1);
-        endRow = ((visibleBounds.bottom - tileLayer.offsetY) / th).ceil().clamp(0, tileLayer.height - 1);
+        startCol = ((visibleBounds.left - tileLayer.offsetX) / tw)
+            .floor()
+            .clamp(0, tileLayer.width - 1);
+        endCol = ((visibleBounds.right - tileLayer.offsetX) / tw).ceil().clamp(
+          0,
+          tileLayer.width - 1,
+        );
+        startRow = ((visibleBounds.top - tileLayer.offsetY) / th).floor().clamp(
+          0,
+          tileLayer.height - 1,
+        );
+        endRow = ((visibleBounds.bottom - tileLayer.offsetY) / th).ceil().clamp(
+          0,
+          tileLayer.height - 1,
+        );
         break;
       default:
         // For non-orthogonal, render all tiles (culling math is complex)
@@ -267,25 +298,63 @@ class TileMapRenderer {
 
         final pos = _tileToWorld(col, row);
 
-        // Handle flip flags
-        final flipH = i < tileLayer.flipHorizontal.length &&
-            tileLayer.flipHorizontal[i];
-        final flipV = i < tileLayer.flipVertical.length &&
-            tileLayer.flipVertical[i];
+        // Handle flip flags — same logic as compile().
+        final flipH =
+            i < tileLayer.flipHorizontal.length && tileLayer.flipHorizontal[i];
+        final flipV =
+            i < tileLayer.flipVertical.length && tileLayer.flipVertical[i];
+        final flipD =
+            i < tileLayer.flipDiagonal.length && tileLayer.flipDiagonal[i];
 
         double scos = 1.0;
         double ssin = 0.0;
         double tx = pos.dx;
         double ty = pos.dy;
 
-        if (flipH) {
-          scos = -1.0;
-          tx += tw;
-        }
-        if (flipV) {
-          scos = -scos;
-          if (!flipH) tx += tw;
-          ty += th;
+        double srcL = sourceRect.left;
+        double srcT = sourceRect.top;
+        double srcR = sourceRect.right;
+        double srcB = sourceRect.bottom;
+
+        if (flipD) {
+          if (flipH && flipV) {
+            scos = 0.0;
+            ssin = -1.0;
+            tx = pos.dx;
+            ty = pos.dy + tw;
+            final tmp = srcT;
+            srcT = srcB;
+            srcB = tmp;
+          } else if (flipH) {
+            scos = 0.0;
+            ssin = -1.0;
+            tx = pos.dx;
+            ty = pos.dy + tw;
+          } else if (flipV) {
+            scos = 0.0;
+            ssin = 1.0;
+            tx = pos.dx + tw;
+            ty = pos.dy;
+          } else {
+            scos = 0.0;
+            ssin = -1.0;
+            tx = pos.dx;
+            ty = pos.dy + tw;
+            final tmp = srcL;
+            srcL = srcR;
+            srcR = tmp;
+          }
+        } else {
+          if (flipH) {
+            final tmp = srcL;
+            srcL = srcR;
+            srcR = tmp;
+          }
+          if (flipV) {
+            final tmp = srcT;
+            srcT = srcB;
+            srcB = tmp;
+          }
         }
 
         final tIdx = count * 4;
@@ -294,10 +363,10 @@ class TileMapRenderer {
         culledTransforms[tIdx + 2] = tx;
         culledTransforms[tIdx + 3] = ty;
 
-        culledRects[tIdx] = sourceRect.left;
-        culledRects[tIdx + 1] = sourceRect.top;
-        culledRects[tIdx + 2] = sourceRect.right;
-        culledRects[tIdx + 3] = sourceRect.bottom;
+        culledRects[tIdx] = srcL;
+        culledRects[tIdx + 1] = srcT;
+        culledRects[tIdx + 2] = srcR;
+        culledRects[tIdx + 3] = srcB;
 
         count++;
       }
@@ -314,7 +383,11 @@ class TileMapRenderer {
     }
 
     // Use only the filled portion of the buffers
-    final usedTransforms = Float32List.sublistView(culledTransforms, 0, count * 4);
+    final usedTransforms = Float32List.sublistView(
+      culledTransforms,
+      0,
+      count * 4,
+    );
     final usedRects = Float32List.sublistView(culledRects, 0, count * 4);
 
     canvas.drawRawAtlas(
@@ -341,10 +414,7 @@ class TileMapRenderer {
 
       case MapOrientation.isometric:
         final originX = map.height * tw / 2;
-        return ui.Offset(
-          (col - row) * tw / 2 + originX,
-          (col + row) * th / 2,
-        );
+        return ui.Offset((col - row) * tw / 2 + originX, (col + row) * th / 2);
 
       case MapOrientation.staggered:
         final staggerX = map.staggerAxis == StaggerAxis.x;
@@ -352,16 +422,10 @@ class TileMapRenderer {
 
         if (staggerX) {
           final isStaggered = staggerEven ? (col % 2 == 0) : (col % 2 != 0);
-          return ui.Offset(
-            col * tw / 2,
-            row * th + (isStaggered ? th / 2 : 0),
-          );
+          return ui.Offset(col * tw / 2, row * th + (isStaggered ? th / 2 : 0));
         } else {
           final isStaggered = staggerEven ? (row % 2 == 0) : (row % 2 != 0);
-          return ui.Offset(
-            col * tw + (isStaggered ? tw / 2 : 0),
-            row * th / 2,
-          );
+          return ui.Offset(col * tw + (isStaggered ? tw / 2 : 0), row * th / 2);
         }
 
       case MapOrientation.hexagonal:
@@ -425,5 +489,13 @@ class TileMapRenderer {
   /// Mark buffers as needing recompilation.
   void invalidate() {
     _dirty = true;
+  }
+
+  /// Dispose the underlying [TextureAtlas] image resource.
+  ///
+  /// Call this when the renderer is no longer needed to release the GPU
+  /// texture held by [atlas].
+  void dispose() {
+    atlas.dispose();
   }
 }

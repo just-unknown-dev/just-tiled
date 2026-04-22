@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.3.0] - 2026-04-22
+
+### Breaking
+- `Layer.parallelX` / `parallelY` renamed to `parallaxX` / `parallaxY`.
+
+### Fixed
+- `TileMapRenderer`: corrected H/V/diagonal tile flip logic in both `compile()` and `_renderCulled()`; `_tileCount` now reflects actual compiled tiles.
+- `TileMapParser`: template-load errors now logged in debug mode instead of silently swallowed; `_parsePointsString` uses `tryParse` to avoid crashes on malformed data; `_mergeTemplateObject` respects the Tiled 1.9+ `class` attribute on templates.
+- `SpatialHashGrid`: fixed `_hash` bit-shift that caused collisions for symmetric coordinates; `queryRadius` is now O(1) per candidate via a cached bounds map.
+
+### Added
+- `TileMapRenderer.dispose()` for releasing the atlas `ui.Image`.
+
+### Tests
+- Expanded from 5 to 46 tests.
+
+---
+
 ## [0.2.0] - 2026-03-15
 
 ### Added

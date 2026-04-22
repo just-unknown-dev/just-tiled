@@ -25,6 +25,9 @@ class SpatialHashGrid<T> {
   /// Reverse lookup: item → set of cell hashes it occupies.
   final Map<T, Set<int>> _itemCells = {};
 
+  /// Bounds cache: item → AABB, used for O(1) queryRadius checks.
+  final Map<T, Rect> _itemBounds = {};
+
   /// Create a spatial hash grid with the given [cellSize].
   SpatialHashGrid({this.cellSize = 64.0});
 
@@ -32,6 +35,7 @@ class SpatialHashGrid<T> {
   void insert(T item, Rect bounds) {
     final cellKeys = _getCellKeys(bounds);
     _itemCells[item] = cellKeys;
+    _itemBounds[item] = bounds;
 
     final entry = _GridEntry(item, bounds);
     for (final key in cellKeys) {
@@ -43,6 +47,7 @@ class SpatialHashGrid<T> {
   bool remove(T item) {
     final cellKeys = _itemCells.remove(item);
     if (cellKeys == null) return false;
+    _itemBounds.remove(item);
 
     for (final key in cellKeys) {
       _cells[key]?.removeWhere((e) => e.item == item);
@@ -89,30 +94,19 @@ class SpatialHashGrid<T> {
     final queryRect = Rect.fromCircle(center: center, radius: radius);
     final candidates = query(queryRect);
 
-    // Filter to items actually within the circle
+    // Filter candidates using the cached bounds for O(1) per item.
     final result = <T>{};
     final radiusSq = radius * radius;
     for (final item in candidates) {
-      final cellKeys = _itemCells[item];
-      if (cellKeys == null) continue;
-      // Find the item's bounds from any cell
-      for (final key in cellKeys) {
-        final entries = _cells[key];
-        if (entries == null) continue;
-        for (final entry in entries) {
-          if (entry.item == item) {
-            // Check if bounds intersect circle
-            final closestX = center.dx.clamp(entry.bounds.left, entry.bounds.right);
-            final closestY = center.dy.clamp(entry.bounds.top, entry.bounds.bottom);
-            final distSq = (closestX - center.dx) * (closestX - center.dx) +
-                (closestY - center.dy) * (closestY - center.dy);
-            if (distSq <= radiusSq) {
-              result.add(item);
-            }
-            break;
-          }
-        }
-        break;
+      final bounds = _itemBounds[item];
+      if (bounds == null) continue;
+      final closestX = center.dx.clamp(bounds.left, bounds.right);
+      final closestY = center.dy.clamp(bounds.top, bounds.bottom);
+      final distSq =
+          (closestX - center.dx) * (closestX - center.dx) +
+          (closestY - center.dy) * (closestY - center.dy);
+      if (distSq <= radiusSq) {
+        result.add(item);
       }
     }
 
@@ -123,6 +117,7 @@ class SpatialHashGrid<T> {
   void clear() {
     _cells.clear();
     _itemCells.clear();
+    _itemBounds.clear();
   }
 
   /// Number of items in the grid.
@@ -152,7 +147,7 @@ class SpatialHashGrid<T> {
 
   /// Hash function for grid coordinates using prime multiplication.
   int _hash(int x, int y) {
-    return (x * 73856093) ^ ((y * 19349663) >> 1);
+    return (x * 73856093) ^ (y * 19349663);
   }
 }
 

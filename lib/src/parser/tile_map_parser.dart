@@ -91,9 +91,7 @@ class TileMapParser {
       staggerIndex: element.getAttribute('staggerindex') != null
           ? StaggerIndex.fromString(element.getAttribute('staggerindex')!)
           : null,
-      hexSideLength: int.tryParse(
-        element.getAttribute('hexsidelength') ?? '',
-      ),
+      hexSideLength: int.tryParse(element.getAttribute('hexsidelength') ?? ''),
       tilesets: tilesets,
       layers: layers,
       properties: _parseProperties(element),
@@ -158,9 +156,7 @@ class TileMapParser {
       imageSource: imageElement?.getAttribute('source'),
       imageWidth: int.tryParse(imageElement?.getAttribute('width') ?? ''),
       imageHeight: int.tryParse(imageElement?.getAttribute('height') ?? ''),
-      transparentColor: _parseColor(
-        imageElement?.getAttribute('trans'),
-      ),
+      transparentColor: _parseColor(imageElement?.getAttribute('trans')),
       tiles: tiles,
       source: source,
       properties: _parseProperties(element),
@@ -183,19 +179,19 @@ class TileMapParser {
     final animation = <AnimationFrame>[];
     if (animElement != null) {
       for (final frameElement in animElement.findElements('frame')) {
-        animation.add(AnimationFrame(
-          tileId: int.parse(frameElement.getAttribute('tileid') ?? '0'),
-          duration: int.parse(frameElement.getAttribute('duration') ?? '100'),
-        ));
+        animation.add(
+          AnimationFrame(
+            tileId: int.parse(frameElement.getAttribute('tileid') ?? '0'),
+            duration: int.parse(frameElement.getAttribute('duration') ?? '100'),
+          ),
+        );
       }
     }
 
     return Tile(
       id: int.parse(element.getAttribute('id') ?? '0'),
       type: element.getAttribute('type') ?? element.getAttribute('class'),
-      probability: double.parse(
-        element.getAttribute('probability') ?? '1.0',
-      ),
+      probability: double.parse(element.getAttribute('probability') ?? '1.0'),
       imageSource: element.getElement('image')?.getAttribute('source'),
       imageWidth: int.tryParse(
         element.getElement('image')?.getAttribute('width') ?? '',
@@ -239,9 +235,7 @@ class TileMapParser {
     LayerCompression compression = LayerCompression.none;
 
     if (dataElement != null) {
-      encoding = LayerEncoding.fromString(
-        dataElement.getAttribute('encoding'),
-      );
+      encoding = LayerEncoding.fromString(dataElement.getAttribute('encoding'));
       compression = LayerCompression.fromString(
         dataElement.getAttribute('compression'),
       );
@@ -269,8 +263,8 @@ class TileMapParser {
       offsetX: double.parse(element.getAttribute('offsetx') ?? '0'),
       offsetY: double.parse(element.getAttribute('offsety') ?? '0'),
       tintColor: _parseColor(element.getAttribute('tintcolor')),
-      parallelX: double.parse(element.getAttribute('parallaxx') ?? '1.0'),
-      parallelY: double.parse(element.getAttribute('parallaxy') ?? '1.0'),
+      parallaxX: double.parse(element.getAttribute('parallaxx') ?? '1.0'),
+      parallaxY: double.parse(element.getAttribute('parallaxy') ?? '1.0'),
       properties: _parseProperties(element),
       width: width,
       height: height,
@@ -325,15 +319,11 @@ class TileMapParser {
         break;
 
       case LayerCompression.gzip:
-        decompressed = Uint8List.fromList(
-          GZipDecoder().decodeBytes(bytes),
-        );
+        decompressed = Uint8List.fromList(GZipDecoder().decodeBytes(bytes));
         break;
 
       case LayerCompression.zlib:
-        decompressed = Uint8List.fromList(
-          ZLibDecoder().decodeBytes(bytes),
-        );
+        decompressed = Uint8List.fromList(ZLibDecoder().decodeBytes(bytes));
         break;
 
       case LayerCompression.zstd:
@@ -357,7 +347,8 @@ class TileMapParser {
   static List<int> _bytesToGids(Uint8List bytes) {
     final gids = <int>[];
     for (int i = 0; i + 3 < bytes.length; i += 4) {
-      final gid = bytes[i] |
+      final gid =
+          bytes[i] |
           (bytes[i + 1] << 8) |
           (bytes[i + 2] << 16) |
           (bytes[i + 3] << 24);
@@ -384,8 +375,8 @@ class TileMapParser {
       offsetX: double.parse(element.getAttribute('offsetx') ?? '0'),
       offsetY: double.parse(element.getAttribute('offsety') ?? '0'),
       tintColor: _parseColor(element.getAttribute('tintcolor')),
-      parallelX: double.parse(element.getAttribute('parallaxx') ?? '1.0'),
-      parallelY: double.parse(element.getAttribute('parallaxy') ?? '1.0'),
+      parallaxX: double.parse(element.getAttribute('parallaxx') ?? '1.0'),
+      parallaxY: double.parse(element.getAttribute('parallaxy') ?? '1.0'),
       properties: _parseProperties(element),
       drawOrder: DrawOrder.fromString(
         element.getAttribute('draworder') ?? 'topdown',
@@ -415,8 +406,13 @@ class TileMapParser {
             templatePath,
           );
         }
-      } catch (_) {
-        // Fall through to parse without template
+      } catch (e, st) {
+        // Template load failed; degrade gracefully to the inline object.
+        assert(() {
+          // ignore: avoid_print
+          print('just_tiled: failed to load template "$templatePath": $e\n$st');
+          return true;
+        }());
       }
     }
     return _parseObject(element);
@@ -438,7 +434,12 @@ class TileMapParser {
     return TiledObject(
       id: int.parse(attr('id', '0')),
       name: attr('name'),
-      type: attr('type', instance.getAttribute('class') ?? ''),
+      type:
+          instance.getAttribute('type') ??
+          instance.getAttribute('class') ??
+          template.getAttribute('type') ??
+          template.getAttribute('class') ??
+          '',
       x: double.parse(attr('x', '0')),
       y: double.parse(attr('y', '0')),
       width: double.parse(attr('width', '0')),
@@ -449,11 +450,14 @@ class TileMapParser {
       templatePath: templatePath,
       polygon: _parsePolygon(instance) ?? _parsePolygon(template),
       polyline: _parsePolyline(instance) ?? _parsePolyline(template),
-      isEllipse: instance.getElement('ellipse') != null ||
+      isEllipse:
+          instance.getElement('ellipse') != null ||
           template.getElement('ellipse') != null,
-      isPoint: instance.getElement('point') != null ||
+      isPoint:
+          instance.getElement('point') != null ||
           template.getElement('point') != null,
-      text: instance.getElement('text')?.innerText ??
+      text:
+          instance.getElement('text')?.innerText ??
           template.getElement('text')?.innerText,
       properties: _mergeProperties(
         _parseProperties(template),
@@ -467,9 +471,7 @@ class TileMapParser {
     return TiledObject(
       id: int.parse(element.getAttribute('id') ?? '0'),
       name: element.getAttribute('name') ?? '',
-      type: element.getAttribute('type') ??
-          element.getAttribute('class') ??
-          '',
+      type: element.getAttribute('type') ?? element.getAttribute('class') ?? '',
       x: double.parse(element.getAttribute('x') ?? '0'),
       y: double.parse(element.getAttribute('y') ?? '0'),
       width: double.parse(element.getAttribute('width') ?? '0'),
@@ -498,13 +500,11 @@ class TileMapParser {
       offsetX: double.parse(element.getAttribute('offsetx') ?? '0'),
       offsetY: double.parse(element.getAttribute('offsety') ?? '0'),
       tintColor: _parseColor(element.getAttribute('tintcolor')),
-      parallelX: double.parse(element.getAttribute('parallaxx') ?? '1.0'),
-      parallelY: double.parse(element.getAttribute('parallaxy') ?? '1.0'),
+      parallaxX: double.parse(element.getAttribute('parallaxx') ?? '1.0'),
+      parallaxY: double.parse(element.getAttribute('parallaxy') ?? '1.0'),
       properties: _parseProperties(element),
       imageSource: imageElement?.getAttribute('source'),
-      transparentColor: _parseColor(
-        imageElement?.getAttribute('trans'),
-      ),
+      transparentColor: _parseColor(imageElement?.getAttribute('trans')),
     );
   }
 
@@ -527,8 +527,8 @@ class TileMapParser {
       offsetX: double.parse(element.getAttribute('offsetx') ?? '0'),
       offsetY: double.parse(element.getAttribute('offsety') ?? '0'),
       tintColor: _parseColor(element.getAttribute('tintcolor')),
-      parallelX: double.parse(element.getAttribute('parallaxx') ?? '1.0'),
-      parallelY: double.parse(element.getAttribute('parallaxy') ?? '1.0'),
+      parallaxX: double.parse(element.getAttribute('parallaxx') ?? '1.0'),
+      parallaxY: double.parse(element.getAttribute('parallaxy') ?? '1.0'),
       properties: _parseProperties(element),
       layers: layers,
     );
@@ -551,11 +551,11 @@ class TileMapParser {
   /// Parse a Tiled points string (e.g., "0,0 32,0 32,32").
   static List<Offset> _parsePointsString(String pointsStr) {
     if (pointsStr.isEmpty) return [];
-    return pointsStr.split(' ').map((pair) {
+    return pointsStr.split(' ').where((p) => p.isNotEmpty).map((pair) {
       final parts = pair.split(',');
       return Offset(
-        double.parse(parts[0]),
-        double.parse(parts.length > 1 ? parts[1] : '0'),
+        double.tryParse(parts[0]) ?? 0.0,
+        parts.length > 1 ? (double.tryParse(parts[1]) ?? 0.0) : 0.0,
       );
     }).toList();
   }

@@ -30,10 +30,10 @@ abstract class Layer {
   final Color? tintColor;
 
   /// Parallax scrolling factor (horizontal).
-  final double parallelX;
+  final double parallaxX;
 
   /// Parallax scrolling factor (vertical).
-  final double parallelY;
+  final double parallaxY;
 
   /// Custom properties.
   final TiledProperties properties;
@@ -46,8 +46,8 @@ abstract class Layer {
     this.offsetX = 0,
     this.offsetY = 0,
     this.tintColor,
-    this.parallelX = 1.0,
-    this.parallelY = 1.0,
+    this.parallaxX = 1.0,
+    this.parallaxY = 1.0,
     TiledProperties? properties,
   }) : properties = properties ?? const TiledProperties();
 }
@@ -86,8 +86,8 @@ class TileLayer extends Layer {
     super.offsetX,
     super.offsetY,
     super.tintColor,
-    super.parallelX,
-    super.parallelY,
+    super.parallaxX,
+    super.parallaxY,
     super.properties,
     required this.width,
     required this.height,
@@ -119,8 +119,8 @@ class ObjectGroup extends Layer {
     super.offsetX,
     super.offsetY,
     super.tintColor,
-    super.parallelX,
-    super.parallelY,
+    super.parallaxX,
+    super.parallaxY,
     super.properties,
     this.drawOrder = DrawOrder.topDown,
     this.color,
@@ -145,8 +145,8 @@ class ImageLayer extends Layer {
     super.offsetX,
     super.offsetY,
     super.tintColor,
-    super.parallelX,
-    super.parallelY,
+    super.parallaxX,
+    super.parallaxY,
     super.properties,
     this.imageSource,
     this.transparentColor,
@@ -167,8 +167,8 @@ class GroupLayer extends Layer {
     super.offsetX,
     super.offsetY,
     super.tintColor,
-    super.parallelX,
-    super.parallelY,
+    super.parallaxX,
+    super.parallaxY,
     super.properties,
     this.layers = const [],
   });
