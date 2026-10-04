@@ -1,17 +1,20 @@
 /// just_tiled example
 ///
-/// Demonstrates parsing a Tiled TMX map, building texture atlases, rendering
-/// tile layers onto a Flutter canvas, and querying map objects.
+/// Reads a Tiled map (TMX or TMJ), loads its tileset images, draws its tile
+/// layers on a Flutter canvas you can drag around, and shows the map's
+/// objects, properties, raw tile ids and the writers.
 ///
 /// Prerequisites:
-/// - Add a `.tmx` file (and any `.tsx` / image files it references) under
-///   `assets/maps/` and declare the folder in `pubspec.yaml`:
+/// - Put a `.tmx` or `.tmj` map, and the tilesets and images it uses, under
+///   `assets/` and declare the folders in `pubspec.yaml`:
 ///
 /// ```yaml
 /// flutter:
 ///   assets:
 ///     - assets/maps/
 /// ```
+///
+/// - Set [mapPath] below to your map.
 library;
 
 import 'dart:ui' as ui;
@@ -19,6 +22,10 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:just_tiled/just_tiled.dart';
+
+/// The map to show. A `.tmj` file is read with [TmjParser], anything else
+/// with [TileMapParser].
+const mapPath = 'assets/maps/desert.tmx';
 
 // ---------------------------------------------------------------------------
 // Entry point
@@ -43,6 +50,9 @@ class _TiledExamplePageState extends State<TiledExamplePage> {
   _MapScene? _scene;
   String _status = 'Loading map…';
 
+  /// How far the map has been dragged from the centre of the screen.
+  Offset _pan = Offset.zero;
+
   @override
   void initState() {
     super.initState();
@@ -51,83 +61,104 @@ class _TiledExamplePageState extends State<TiledExamplePage> {
 
   Future<void> _load() async {
     try {
-      // 1. Parse the TMX file ------------------------------------------------
-      //    DefaultTsxProvider resolves .tsx / template files from the asset
-      //    bundle relative to the given basePath.
-      final tmxXml = await rootBundle.loadString('assets/maps/desert.tmx');
-      final map = await TileMapParser.parse(
-        tmxXml,
-        tsxProvider: const DefaultTsxProvider(basePath: 'assets/maps'),
-      );
+      // 1. Parse the map ----------------------------------------------------
+      //    The provider loads external tilesets (.tsx / .tsj) and object
+      //    templates. DefaultTsxProvider does this from the asset bundle
+      //    when they sit beside the map; _AssetProvider also follows `../`.
+      final text = await rootBundle.loadString(mapPath);
+      const provider = _AssetProvider(mapPath);
+      final map = mapPath.endsWith('.tmj')
+          ? await TmjParser.parse(text, tsxProvider: provider)
+          : await TileMapParser.parse(text, tsxProvider: provider);
 
       // 2. Load tileset images and build texture atlases ---------------------
+      //    An image path is relative to the file that declares the tileset:
+      //    the map, or the external tileset file. Image-collection tilesets
+      //    have no single image and are skipped.
       final atlases = <TextureAtlas>[];
       for (final tileset in map.tilesets) {
         final imageSource = tileset.imageSource;
         if (imageSource == null) continue;
 
-        final data = await rootBundle.load('assets/maps/$imageSource');
-        final codec = await ui.instantiateImageCodec(data.buffer.asUint8List());
-        final frame = await codec.getNextFrame();
-        atlases.add(TextureAtlas(image: frame.image, tileset: tileset));
-      }
-      final atlasCollection = TextureAtlasCollection(atlases);
-
-      // 3. Create one TileMapRenderer per tile layer -------------------------
-      //    compile() converts the layer into Float32List buffers that are
-      //    rendered with a single Canvas.drawRawAtlas call.
-      final renderers = <TileMapRenderer>[];
-      for (final layer in map.tileLayers) {
-        // Find the atlas that covers the GIDs used in this layer.
-        final atlas = atlasCollection.atlases.firstOrNull;
-        if (atlas == null) continue;
-
-        final renderer = TileMapRenderer(
-          tileLayer: layer,
-          map: map,
-          atlas: atlas,
-        );
-        renderer.compile();
-        renderers.add(renderer);
+        final declaredIn = tileset.source == null
+            ? mapPath
+            : _resolve(mapPath, tileset.source!);
+        final image = await _loadImage(_resolve(declaredIn, imageSource));
+        atlases.add(TextureAtlas(image: image, tileset: tileset));
       }
 
-      // 4. Log map info and objects ------------------------------------------
+      // 3. Create the renderers ---------------------------------------------
+      //    A renderer draws one layer's tiles from one atlas, so a layer that
+      //    uses several tilesets gets one per atlas. compile() turns the
+      //    layer into the buffers of a single Canvas.drawRawAtlas call.
+      //    Hidden layers and an infinite map's chunked layers are skipped:
+      //    the renderer draws neither.
+      final renderers = [
+        for (final layer in map.tileLayers)
+          if (layer.visible && !layer.isChunked)
+            for (final atlas in atlases)
+              TileMapRenderer(map: map, tileLayer: layer, atlas: atlas)
+                ..compile(),
+      ];
+
+      // 4. Log the map and its layers ----------------------------------------
       debugPrint(
         'Map: ${map.width}x${map.height} tiles '
         '(${map.pixelWidth}x${map.pixelHeight} px), '
-        'orientation: ${map.orientation}',
+        '${map.orientation.name}${map.infinite ? ', infinite' : ''}',
       );
+      for (final layer in map.tileLayers) {
+        debugPrint(
+          layer.isChunked
+              ? 'Layer "${layer.name}": ${layer.chunks.length} chunk(s)'
+              : 'Layer "${layer.name}": ${layer.width}x${layer.height}',
+        );
+      }
 
+      // 5. Log the objects ---------------------------------------------------
+      //    A tile object's gid is raw: TiledGid takes the flags off.
       for (final group in map.objectGroups) {
         for (final obj in group.objects) {
+          final gid = obj.gid;
           debugPrint(
             'Object "${obj.name}" (${obj.type}) '
-            'at (${obj.x.toStringAsFixed(0)}, ${obj.y.toStringAsFixed(0)})',
+            'at (${obj.x.toStringAsFixed(0)}, ${obj.y.toStringAsFixed(0)})'
+            '${gid == null ? '' : ', tile ${TiledGid.idOf(gid)}'}'
+            '${gid != null && TiledGid.isFlippedHorizontally(gid) ? ', mirrored' : ''}',
           );
         }
       }
 
-      // 5. Read a custom map property ----------------------------------------
+      // 6. Read a custom map property ----------------------------------------
       if (map.properties.has('gravity')) {
         final gravity = map.properties.getDouble('gravity');
         debugPrint('Custom gravity: $gravity');
       }
 
-      // 6. Use the spatial hash grid to index objects -----------------------
+      // 7. Index the objects in a spatial hash grid --------------------------
       final grid = SpatialHashGrid<TiledObject>(cellSize: 128);
       for (final obj in map.objectGroups.expand((g) => g.objects)) {
         grid.insert(obj, Rect.fromLTWH(obj.x, obj.y, obj.width, obj.height));
       }
-      // Query objects near the origin (e.g., camera viewport).
       final nearby = grid.query(const Rect.fromLTWH(0, 0, 512, 512));
-      debugPrint('Objects near origin: ${nearby.length}');
+      debugPrint('Objects within 512 px of the origin: ${nearby.length}');
 
-      if (mounted) {
-        setState(() {
-          _scene = _MapScene(map: map, renderers: renderers);
-          _status = '${map.tileLayers.length} layer(s) rendered';
-        });
+      // 8. Write the map back out --------------------------------------------
+      //    The writers return text; save it wherever you like.
+      final tmx = TmxWriter.write(map, encoding: TmxDataEncoding.base64Zlib);
+      final tmj = TmjWriter.write(map);
+      debugPrint('As TMX: ${tmx.length} characters; as TMJ: ${tmj.length}');
+
+      if (!mounted) {
+        for (final atlas in atlases) {
+          atlas.dispose();
+        }
+        return;
       }
+      setState(() {
+        _scene = _MapScene(map: map, atlases: atlases, renderers: renderers);
+        _status = '${renderers.length} renderer(s) · drag to move';
+      });
     } catch (e) {
       if (mounted) {
         setState(() => _status = 'Error: $e');
@@ -143,13 +174,14 @@ class _TiledExamplePageState extends State<TiledExamplePage> {
 
   @override
   Widget build(BuildContext context) {
+    final scene = _scene;
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: scene?.map.backgroundColor ?? Colors.black,
       appBar: AppBar(
         title: const Text('just_tiled Example'),
         backgroundColor: Colors.black87,
       ),
-      body: _scene == null
+      body: scene == null
           ? Center(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -162,9 +194,13 @@ class _TiledExamplePageState extends State<TiledExamplePage> {
             )
           : Stack(
               children: [
-                CustomPaint(
-                  painter: _TileMapPainter(scene: _scene!),
-                  child: const SizedBox.expand(),
+                GestureDetector(
+                  onPanUpdate: (details) =>
+                      setState(() => _pan += details.delta),
+                  child: CustomPaint(
+                    painter: _TileMapPainter(scene: scene, pan: _pan),
+                    child: const SizedBox.expand(),
+                  ),
                 ),
                 Positioned(
                   bottom: 16,
@@ -181,18 +217,69 @@ class _TiledExamplePageState extends State<TiledExamplePage> {
 }
 
 // ---------------------------------------------------------------------------
+// Loading
+// ---------------------------------------------------------------------------
+
+/// Loads external tilesets and templates from the asset bundle, relative to
+/// the map that names them.
+class _AssetProvider implements TsxProvider {
+  const _AssetProvider(this.mapPath);
+
+  final String mapPath;
+
+  @override
+  Future<String> getTsx(String source) =>
+      rootBundle.loadString(_resolve(mapPath, source));
+
+  @override
+  Future<String> getTemplate(String source) =>
+      rootBundle.loadString(_resolve(mapPath, source));
+}
+
+/// [relative] as written in [file], as an asset path: resolved against the
+/// folder [file] is in, with `.` and `..` collapsed.
+String _resolve(String file, String relative) {
+  final parts = file.split('/')..removeLast();
+  for (final part in relative.replaceAll('\\', '/').split('/')) {
+    if (part == '..') {
+      if (parts.isNotEmpty) parts.removeLast();
+    } else if (part.isNotEmpty && part != '.') {
+      parts.add(part);
+    }
+  }
+  return parts.join('/');
+}
+
+Future<ui.Image> _loadImage(String asset) async {
+  final data = await rootBundle.load(asset);
+  final codec = await ui.instantiateImageCodec(data.buffer.asUint8List());
+  return (await codec.getNextFrame()).image;
+}
+
+// ---------------------------------------------------------------------------
 // Scene container
 // ---------------------------------------------------------------------------
 
 class _MapScene {
   final TiledMap map;
+  final List<TextureAtlas> atlases;
   final List<TileMapRenderer> renderers;
 
-  _MapScene({required this.map, required this.renderers});
+  /// Everything the renderers draw, in world space.
+  final Rect bounds;
 
+  _MapScene({required this.map, required this.atlases, required this.renderers})
+    : bounds = renderers.isEmpty
+          ? Rect.zero
+          : renderers
+                .map((r) => r.worldBounds)
+                .reduce((a, b) => a.expandToInclude(b));
+
+  /// Renderers share atlases, so each atlas is disposed here, once —
+  /// not through TileMapRenderer.dispose().
   void dispose() {
-    for (final r in renderers) {
-      r.atlas.dispose();
+    for (final atlas in atlases) {
+      atlas.dispose();
     }
   }
 }
@@ -203,25 +290,30 @@ class _MapScene {
 
 class _TileMapPainter extends CustomPainter {
   final _MapScene scene;
+  final Offset pan;
 
-  const _TileMapPainter({required this.scene});
+  const _TileMapPainter({required this.scene, required this.pan});
 
   @override
   void paint(Canvas canvas, Size size) {
-    // Simple camera: centre the map in the viewport.
-    final mapPixelW = scene.map.pixelWidth.toDouble();
-    final mapPixelH = scene.map.pixelHeight.toDouble();
-    final cameraOffset = Offset(
-      (size.width - mapPixelW) / 2,
-      (size.height - mapPixelH) / 2,
-    );
-    final visibleBounds = Rect.fromLTWH(0, 0, size.width, size.height);
+    // The camera is the world point at the screen's top-left: the map
+    // starts centred, then follows the drag.
+    final camera = scene.bounds.center - size.center(Offset.zero) - pan;
+
+    // render() doesn't move the canvas: translate to the camera here, and
+    // pass the world-space area on screen for culling.
+    canvas.save();
+    canvas.translate(-camera.dx, -camera.dy);
+    final visible = camera & size;
 
     for (final renderer in scene.renderers) {
-      renderer.render(canvas, cameraOffset, visibleBounds);
+      renderer.render(canvas, camera, visible);
     }
+
+    canvas.restore();
   }
 
   @override
-  bool shouldRepaint(covariant _TileMapPainter old) => false;
+  bool shouldRepaint(covariant _TileMapPainter old) =>
+      old.scene != scene || old.pan != pan;
 }
