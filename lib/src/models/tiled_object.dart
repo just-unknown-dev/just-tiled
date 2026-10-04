@@ -6,12 +6,30 @@ import 'dart:ui';
 /// Typed custom properties from Tiled's properties tags.
 class TiledProperties {
   final Map<String, dynamic> _values;
+  final Map<String, String> _types;
 
-  const TiledProperties([Map<String, dynamic>? values])
-    : _values = values ?? const {};
+  /// [types] records each property's declared Tiled type (`string`, `int`,
+  /// `float`, `bool`, `color`, `file`, `object`) where the value alone
+  /// cannot say — a `file` is a string, an `object` an int — so a writer
+  /// can give it back as it was.
+  const TiledProperties([Map<String, dynamic>? values, Map<String, String>? types])
+    : _values = values ?? const {},
+      _types = types ?? const {};
 
   /// All property keys.
   Iterable<String> get keys => _values.keys;
+
+  /// The Tiled type of [key]: as declared, or read from the value.
+  String typeOf(String key) {
+    final declared = _types[key];
+    if (declared != null) return declared;
+    final v = _values[key];
+    if (v is bool) return 'bool';
+    if (v is int) return 'int';
+    if (v is double) return 'float';
+    if (v is Color) return 'color';
+    return 'string';
+  }
 
   /// Whether a property exists.
   bool has(String key) => _values.containsKey(key);

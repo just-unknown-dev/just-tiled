@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.4.0] - 2026-10-04
+
+### Added
+- **Writers.** `TmxWriter.write(map, encoding:)` (CSV, base64, base64+zlib, base64+gzip) and `TsxWriter.write(tileset)` produce TMX 1.10 documents the Tiled editor opens: `type` on tiles and objects, `class` elsewhere, a tileset with a `source` written as a reference to its external file.
+- **Tiled's JSON formats.** `TmjParser` / `TmjWriter` read and write TMJ maps and TSJ tilesets into the same models. A TMX map may now refer to a `.tsj` tileset, and a TMJ map to a `.tsx` one.
+- **Infinite maps.** `TileLayer.chunks` (`TileChunk{x, y, width, height, data}`) and `TileLayer.isChunked`.
+- **Raw ids.** `TileLayer.rawData` keeps every flag, including the hexagonal 120° one; `rawGidAt` / `rawGids`. `TiledGid` holds the flag constants and helpers (`idOf`, `flagsOf`, `compose`, `fromBytes`, `toBytes`) — unsigned throughout, so they behave the same on the web.
+- **Wang sets.** `Tileset.wangSets` (`WangSet`, `WangColor`, `WangSetType` corner / edge / mixed), including Tiled's pre-1.5 hex Wang ids (`TileMapParser.parseWangId`).
+- Tileset `className`, `objectAlignment`, `tileRenderSize`, `fillMode`, `grid`, `transformations`, `isImageCollection`; layer `className` and `locked`; image layer `repeatX` / `repeatY` and image size; map `className` and `parallaxOriginX` / `parallaxOriginY`.
+- `TiledProperties` remembers each property's declared type (`typeOf`), so a `file` or `object` property is written back as one.
+- `TileMapParser.parseTileset` reads a standalone TSX document.
+
+### Fixed
+- **Infinite maps were read as nonsense.** The parser read the whole `<data>` text as one list, running every `<chunk>` together.
+- **The hexagonal 120° rotation flag was left inside the tile id.** The id mask is now `0x0FFFFFFF`; the flag is kept in `rawData`.
+
+### Tests
+- 47 more: fixtures in Tiled 1.10's own form for every orientation, finite and infinite, every encoding and flip, Wang sets of each kind, external TSX and TSJ, each round-tripped through every writer (93 total).
+
+---
 ## [0.3.0] - 2026-04-22
 
 ### Breaking

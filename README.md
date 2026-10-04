@@ -1,14 +1,17 @@
 # Just Tiled
 
-A standalone TMX/TSX parser and hardware-accelerated renderer for [Tiled Map Editor](https://www.mapeditor.org/) files, designed for Flutter-based 2D games.
+A standalone reader and writer (TMX/TSX and TMJ/TSJ) and hardware-accelerated renderer for [Tiled Map Editor](https://www.mapeditor.org/) files, designed for Flutter-based 2D games.
 
-Built to work independently from any game engine — ECS integration is handled at the engine layer (e.g. via `just_game_engine`'s `TiledMapFactory` and `TileMapRenderSystem`).
+Built to work independently from any game engine. `just_game_engine` uses it to import and export Tiled files (its `TiledInterop`); its own tile maps are drawn and collided by the engine.
 
 ---
 
 ## Features
 
-- **Full Tiled format support** — TMX maps and external TSX tilesets (Tiled 1.8+)
+- **Full Tiled format support** — TMX maps and external TSX tilesets (Tiled 1.8+), and Tiled's JSON forms, TMJ and TSJ
+- **Writers** — `TmxWriter`, `TsxWriter` and `TmjWriter` write files the Tiled editor opens
+- **Infinite maps** — chunked tile layers (`TileLayer.chunks`)
+- **Wang sets** — corner, edge and mixed terrains
 - **All map orientations** — Orthogonal, Isometric, Staggered (X/Y), Hexagonal
 - **All layer types** — Tile layers, Object groups, Image layers, nested Group layers
 - **All encodings & compression** — CSV, Base64, XML; GZIP, Zlib, Zstd, or uncompressed
@@ -29,7 +32,7 @@ Add `just_tiled` to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  just_tiled: ^0.1.0
+  just_tiled: ^0.4.0
 ```
 
 Place your `.tmx` map and `.tsx` + image files under `assets/` and declare them:
@@ -83,9 +86,9 @@ final renderers = <TileMapRenderer>[];
 for (final layer in map.tileLayers) {
   renderers.add(TileMapRenderer(
     map: map,
-    layer: layer,
-    atlasCollection: collection,
-  ));
+    tileLayer: layer,
+    atlas: atlases.first, // one tileset per layer
+  )..compile());
 }
 
 // In CustomPainter.paint():
@@ -128,14 +131,21 @@ final nearby = grid.query(cameraRect);
 
 ---
 
-## Integration with just_game_engine
-
-When used alongside `just_game_engine`, the `TiledMapFactory` spawns the map directly into the ECS `World` and `TileMapRenderSystem` renders all tile layers automatically:
+## Writing files
 
 ```dart
-TiledMapFactory.spawnMap(world, map, atlasCollection);
-world.addSystem(TileMapRenderSystem(camera: engine.rendering.camera));
+final tmx = TmxWriter.write(map, encoding: TmxDataEncoding.base64Zlib);
+final tsx = TsxWriter.write(map.tilesets.first);
+final tmj = TmjWriter.write(map);
 ```
+
+A tileset with a `source` is written as a reference to its external file. Raw tile ids keep all four of Tiled's flags (`TileLayer.rawData`, `TiledGid`).
+
+---
+
+## Integration with just_game_engine
+
+The engine's `TiledInterop` turns a parsed map into the engine's own tile map (and back), and its editor imports and exports Tiled files with it. A `TileMapComponent` can also name a `.tmx` or `.tmj` directly.
 
 ---
 

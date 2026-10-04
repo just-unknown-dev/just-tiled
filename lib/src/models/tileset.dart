@@ -3,8 +3,42 @@ library;
 
 import 'dart:ui';
 
+import 'enums.dart';
 import 'tile.dart';
 import 'tiled_object.dart';
+import 'wang.dart';
+
+/// How tile objects of an isometric tileset are laid out in Tiled's
+/// tileset view — the `<grid>` element.
+class TilesetGrid {
+  const TilesetGrid({
+    this.orientation = MapOrientation.orthogonal,
+    this.width = 0,
+    this.height = 0,
+  });
+
+  /// `orthogonal` or `isometric`.
+  final MapOrientation orientation;
+  final int width;
+  final int height;
+}
+
+/// Which ways a Wang brush may turn this tileset's tiles to find a match.
+class TilesetTransformations {
+  const TilesetTransformations({
+    this.hflip = false,
+    this.vflip = false,
+    this.rotate = false,
+    this.preferUntransformed = false,
+  });
+
+  final bool hflip;
+  final bool vflip;
+  final bool rotate;
+  final bool preferUntransformed;
+
+  bool get any => hflip || vflip || rotate || preferUntransformed;
+}
 
 /// A tileset definition.
 ///
@@ -16,6 +50,9 @@ class Tileset {
 
   /// Tileset name.
   final String name;
+
+  /// The tileset's class (Tiled 1.9+).
+  final String className;
 
   /// Width of individual tiles in pixels.
   final int tileWidth;
@@ -38,6 +75,21 @@ class Tileset {
   /// Tile drawing offset.
   final Offset tileOffset;
 
+  /// Which point of a tile object's image sits on the object's position.
+  final ObjectAlignment objectAlignment;
+
+  /// Whether tiles draw at their own size or the map's grid size.
+  final TileRenderSize tileRenderSize;
+
+  /// How a tile drawn at the grid size fills its cell.
+  final FillMode fillMode;
+
+  /// Tiled's tileset-view grid, when the file has one.
+  final TilesetGrid? grid;
+
+  /// Which ways a Wang brush may turn tiles.
+  final TilesetTransformations transformations;
+
   /// Source image path.
   final String? imageSource;
 
@@ -53,6 +105,9 @@ class Tileset {
   /// Per-tile data (keyed by local tile ID).
   final Map<int, Tile> tiles;
 
+  /// Terrain definitions.
+  final List<WangSet> wangSets;
+
   /// Custom properties.
   final TiledProperties properties;
 
@@ -62,6 +117,7 @@ class Tileset {
   const Tileset({
     required this.firstGid,
     this.name = '',
+    this.className = '',
     this.tileWidth = 0,
     this.tileHeight = 0,
     this.spacing = 0,
@@ -69,14 +125,24 @@ class Tileset {
     this.tileCount = 0,
     this.columns = 0,
     this.tileOffset = Offset.zero,
+    this.objectAlignment = ObjectAlignment.unspecified,
+    this.tileRenderSize = TileRenderSize.tile,
+    this.fillMode = FillMode.stretch,
+    this.grid,
+    this.transformations = const TilesetTransformations(),
     this.imageSource,
     this.imageWidth,
     this.imageHeight,
     this.transparentColor,
     this.tiles = const {},
+    this.wangSets = const [],
     this.source,
     TiledProperties? properties,
   }) : properties = properties ?? const TiledProperties();
+
+  /// Whether every tile has an image of its own rather than a cut of one
+  /// sheet.
+  bool get isImageCollection => imageSource == null && columns == 0;
 
   /// Get the source rectangle for a local tile ID within the tileset image.
   Rect getSourceRect(int localId) {

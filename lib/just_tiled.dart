@@ -26,6 +26,12 @@ export 'src/models/models.dart';
 // TMX parser
 export 'src/parser/parser.dart';
 
+// TMX / TSX writers
+export 'src/writer/tmx_writer.dart';
+
+// TMJ / TSJ (Tiled's JSON formats), read and written
+export 'src/json/tmj_codec.dart';
+
 // Rendering pipeline
 export 'src/rendering/rendering.dart';
 

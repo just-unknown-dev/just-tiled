@@ -12,14 +12,9 @@ import 'package:archive/archive.dart';
 import 'package:just_zstd/just_zstd.dart';
 import 'package:xml/xml.dart';
 
+import '../json/tmj_codec.dart';
 import '../models/models.dart';
 import 'tsx_provider.dart';
-
-/// GID flip flag bitmasks (top 3 bits of 32-bit unsigned integer).
-const int _flipHorizontalFlag = 0x80000000;
-const int _flipVerticalFlag = 0x40000000;
-const int _flipDiagonalFlag = 0x20000000;
-const int _gidMask = 0x1FFFFFFF;
 
 /// Parser for Tiled Map Editor TMX files.
 ///
@@ -34,8 +29,8 @@ class TileMapParser {
   /// Parse a TMX XML string into a [TiledMap].
   ///
   /// [tmxXml] is the raw XML content of the .tmx file.
-  /// [tsxProvider] is used to resolve external .tsx tileset references.
-  /// If null, external tilesets will have minimal data.
+  /// [tsxProvider] is used to resolve external .tsx (or .tsj) tileset
+  /// references. If null, external tilesets will have minimal data.
   static Future<TiledMap> parse(
     String tmxXml, {
     TsxProvider? tsxProvider,
@@ -50,6 +45,18 @@ class TileMapParser {
     }
 
     return _parseMap(mapElement, tsxProvider);
+  }
+
+  /// Parse a standalone TSX tileset document. [firstGid] is what the map
+  /// that uses it assigns; 1 when read on its own.
+  static Tileset parseTileset(String tsxXml, {int firstGid = 1, String? source}) {
+    final root = XmlDocument.parse(tsxXml).rootElement;
+    if (root.name.local != 'tileset') {
+      throw FormatException(
+        'Expected root element tileset, got ${root.name.local}',
+      );
+    }
+    return _parseTilesetData(root, firstGid, source);
   }
 
   /// Parse the root `map` element.
@@ -71,16 +78,17 @@ class TileMapParser {
     return TiledMap(
       version: element.getAttribute('version') ?? '1.0',
       tiledVersion: element.getAttribute('tiledversion'),
+      className: element.getAttribute('class') ?? '',
       orientation: MapOrientation.fromString(
         element.getAttribute('orientation') ?? 'orthogonal',
       ),
       renderOrder: RenderOrder.fromString(
         element.getAttribute('renderorder') ?? 'right-down',
       ),
-      width: int.parse(element.getAttribute('width') ?? '0'),
-      height: int.parse(element.getAttribute('height') ?? '0'),
-      tileWidth: int.parse(element.getAttribute('tilewidth') ?? '0'),
-      tileHeight: int.parse(element.getAttribute('tileheight') ?? '0'),
+      width: _int(element, 'width'),
+      height: _int(element, 'height'),
+      tileWidth: _int(element, 'tilewidth'),
+      tileHeight: _int(element, 'tileheight'),
       infinite: element.getAttribute('infinite') == '1',
       backgroundColor: _parseColor(element.getAttribute('backgroundcolor')),
       nextLayerId: int.tryParse(element.getAttribute('nextlayerid') ?? ''),
@@ -92,6 +100,8 @@ class TileMapParser {
           ? StaggerIndex.fromString(element.getAttribute('staggerindex')!)
           : null,
       hexSideLength: int.tryParse(element.getAttribute('hexsidelength') ?? ''),
+      parallaxOriginX: _double(element, 'parallaxoriginx'),
+      parallaxOriginY: _double(element, 'parallaxoriginy'),
       tilesets: tilesets,
       layers: layers,
       properties: _parseProperties(element),
@@ -106,15 +116,29 @@ class TileMapParser {
     final firstGid = int.parse(element.getAttribute('firstgid') ?? '1');
     final source = element.getAttribute('source');
 
-    // External tileset reference
+    // External tileset reference: XML, or Tiled's JSON form.
     if (source != null && tsxProvider != null) {
-      final tsxXml = await tsxProvider.getTsx(source);
-      final tsxDoc = XmlDocument.parse(tsxXml);
-      final tsxRoot = tsxDoc.rootElement;
-      return _parseTilesetData(tsxRoot, firstGid, source);
+      final text = await tsxProvider.getTsx(source);
+      if (_isJsonPath(source)) {
+        return TmjParser.parseTilesetJson(
+          jsonDecode(text) as Map<String, dynamic>,
+          firstGid: firstGid,
+          source: source,
+        );
+      }
+      return _parseTilesetData(
+        XmlDocument.parse(text).rootElement,
+        firstGid,
+        source,
+      );
     }
 
     return _parseTilesetData(element, firstGid, source);
+  }
+
+  static bool _isJsonPath(String path) {
+    final p = path.toLowerCase();
+    return p.endsWith('.tsj') || p.endsWith('.json');
   }
 
   /// Parse tileset data from either embedded or TSX element.
@@ -123,49 +147,126 @@ class TileMapParser {
     int firstGid,
     String? source,
   ) {
-    // Parse tile offset
     Offset tileOffset = Offset.zero;
     final offsetElement = element.getElement('tileoffset');
     if (offsetElement != null) {
       tileOffset = Offset(
-        double.parse(offsetElement.getAttribute('x') ?? '0'),
-        double.parse(offsetElement.getAttribute('y') ?? '0'),
+        _double(offsetElement, 'x'),
+        _double(offsetElement, 'y'),
       );
     }
 
-    // Parse image
+    final gridElement = element.getElement('grid');
+    final transformsElement = element.getElement('transformations');
     final imageElement = element.getElement('image');
 
-    // Parse per-tile data
     final tiles = <int, Tile>{};
     for (final tileElement in element.findElements('tile')) {
       final tile = _parseTile(tileElement);
       tiles[tile.id] = tile;
     }
 
+    final wangSets = <WangSet>[
+      for (final setElement
+          in element.getElement('wangsets')?.findElements('wangset') ??
+              const <XmlElement>[])
+        _parseWangSet(setElement),
+    ];
+
     return Tileset(
       firstGid: firstGid,
       name: element.getAttribute('name') ?? '',
-      tileWidth: int.parse(element.getAttribute('tilewidth') ?? '0'),
-      tileHeight: int.parse(element.getAttribute('tileheight') ?? '0'),
-      spacing: int.parse(element.getAttribute('spacing') ?? '0'),
-      margin: int.parse(element.getAttribute('margin') ?? '0'),
-      tileCount: int.parse(element.getAttribute('tilecount') ?? '0'),
-      columns: int.parse(element.getAttribute('columns') ?? '0'),
+      className: element.getAttribute('class') ?? '',
+      tileWidth: _int(element, 'tilewidth'),
+      tileHeight: _int(element, 'tileheight'),
+      spacing: _int(element, 'spacing'),
+      margin: _int(element, 'margin'),
+      tileCount: _int(element, 'tilecount'),
+      columns: _int(element, 'columns'),
       tileOffset: tileOffset,
+      objectAlignment: ObjectAlignment.fromString(
+        element.getAttribute('objectalignment'),
+      ),
+      tileRenderSize: TileRenderSize.fromString(
+        element.getAttribute('tilerendersize'),
+      ),
+      fillMode: FillMode.fromString(element.getAttribute('fillmode')),
+      grid: gridElement == null
+          ? null
+          : TilesetGrid(
+              orientation: MapOrientation.fromString(
+                gridElement.getAttribute('orientation') ?? 'orthogonal',
+              ),
+              width: _int(gridElement, 'width'),
+              height: _int(gridElement, 'height'),
+            ),
+      transformations: transformsElement == null
+          ? const TilesetTransformations()
+          : TilesetTransformations(
+              hflip: transformsElement.getAttribute('hflip') == '1',
+              vflip: transformsElement.getAttribute('vflip') == '1',
+              rotate: transformsElement.getAttribute('rotate') == '1',
+              preferUntransformed:
+                  transformsElement.getAttribute('preferuntransformed') == '1',
+            ),
       imageSource: imageElement?.getAttribute('source'),
       imageWidth: int.tryParse(imageElement?.getAttribute('width') ?? ''),
       imageHeight: int.tryParse(imageElement?.getAttribute('height') ?? ''),
       transparentColor: _parseColor(imageElement?.getAttribute('trans')),
       tiles: tiles,
+      wangSets: wangSets,
       source: source,
       properties: _parseProperties(element),
     );
   }
 
+  /// Parse a `wangset` element.
+  static WangSet _parseWangSet(XmlElement element) {
+    final colors = [
+      for (final c in element.findElements('wangcolor'))
+        WangColor(
+          name: c.getAttribute('name') ?? '',
+          className: c.getAttribute('class') ?? '',
+          color: _parseColor(c.getAttribute('color')) ?? const Color(0xFFFF0000),
+          tile: int.tryParse(c.getAttribute('tile') ?? '') ?? -1,
+          probability: double.tryParse(c.getAttribute('probability') ?? '') ?? 1,
+          properties: _parseProperties(c),
+        ),
+    ];
+    final wangTiles = <int, List<int>>{};
+    for (final t in element.findElements('wangtile')) {
+      final id = int.tryParse(t.getAttribute('tileid') ?? '');
+      if (id == null) continue;
+      wangTiles[id] = parseWangId(t.getAttribute('wangid') ?? '');
+    }
+    return WangSet(
+      name: element.getAttribute('name') ?? '',
+      className: element.getAttribute('class') ?? '',
+      type: WangSetType.fromString(element.getAttribute('type')),
+      tile: int.tryParse(element.getAttribute('tile') ?? '') ?? -1,
+      colors: colors,
+      wangTiles: wangTiles,
+      properties: _parseProperties(element),
+    );
+  }
+
+  /// A Wang id: eight comma-separated colour indices. Tiled before 1.5 wrote
+  /// one hex number, a nibble per slot, lowest nibble first.
+  static List<int> parseWangId(String text) {
+    final trimmed = text.trim();
+    if (trimmed.startsWith('0x')) {
+      final value = int.tryParse(trimmed.substring(2), radix: 16) ?? 0;
+      return [for (var i = 0; i < 8; i++) (value >> (i * 4)) & 0xF];
+    }
+    final parts = trimmed.split(',');
+    return [
+      for (var i = 0; i < 8; i++)
+        i < parts.length ? int.tryParse(parts[i].trim()) ?? 0 : 0,
+    ];
+  }
+
   /// Parse a `tile` element within a tileset.
   static Tile _parseTile(XmlElement element) {
-    // Parse collision object group
     final objectGroupElement = element.getElement('objectgroup');
     final collisionObjects = <TiledObject>[];
     if (objectGroupElement != null) {
@@ -174,7 +275,6 @@ class TileMapParser {
       }
     }
 
-    // Parse animation
     final animElement = element.getElement('animation');
     final animation = <AnimationFrame>[];
     if (animElement != null) {
@@ -226,45 +326,66 @@ class TileMapParser {
 
   /// Parse a `layer` (tile layer) element.
   static TileLayer _parseTileLayer(XmlElement element) {
-    final width = int.parse(element.getAttribute('width') ?? '0');
-    final height = int.parse(element.getAttribute('height') ?? '0');
+    final width = _int(element, 'width');
+    final height = _int(element, 'height');
 
     final dataElement = element.getElement('data');
-    List<int> rawGids = [];
-    LayerEncoding encoding = LayerEncoding.xml;
-    LayerCompression compression = LayerCompression.none;
+    var raw = Uint32List(0);
+    final chunks = <TileChunk>[];
+    var encoding = LayerEncoding.xml;
+    var compression = LayerCompression.none;
 
     if (dataElement != null) {
       encoding = LayerEncoding.fromString(dataElement.getAttribute('encoding'));
       compression = LayerCompression.fromString(
         dataElement.getAttribute('compression'),
       );
-      rawGids = _decodeData(dataElement, encoding, compression);
+      final chunkElements = dataElement.findElements('chunk').toList();
+      if (chunkElements.isNotEmpty) {
+        // An infinite map: each chunk is a rectangle encoded on its own.
+        // Reading the data element's whole text as one list, as this parser
+        // once did, ran every chunk together into nonsense.
+        for (final chunk in chunkElements) {
+          chunks.add(
+            TileChunk(
+              x: _int(chunk, 'x'),
+              y: _int(chunk, 'y'),
+              width: _int(chunk, 'width'),
+              height: _int(chunk, 'height'),
+              data: _decodeData(chunk, encoding, compression),
+            ),
+          );
+        }
+      } else {
+        raw = _decodeData(dataElement, encoding, compression);
+      }
     }
 
-    // Extract flip flags and clean GIDs
+    // Flags split out for the older fields; [rawData] keeps them whole,
+    // hexagonal rotation included.
     final data = <int>[];
     final flipH = <bool>[];
     final flipV = <bool>[];
     final flipD = <bool>[];
-
-    for (final gid in rawGids) {
-      flipH.add((gid & _flipHorizontalFlag) != 0);
-      flipV.add((gid & _flipVerticalFlag) != 0);
-      flipD.add((gid & _flipDiagonalFlag) != 0);
-      data.add(gid & _gidMask);
+    for (final gid in raw) {
+      flipH.add(TiledGid.isFlippedHorizontally(gid));
+      flipV.add(TiledGid.isFlippedVertically(gid));
+      flipD.add(TiledGid.isFlippedDiagonally(gid));
+      data.add(TiledGid.idOf(gid));
     }
 
     return TileLayer(
-      id: int.parse(element.getAttribute('id') ?? '0'),
+      id: _int(element, 'id'),
       name: element.getAttribute('name') ?? '',
+      className: element.getAttribute('class') ?? '',
       visible: element.getAttribute('visible') != '0',
-      opacity: double.parse(element.getAttribute('opacity') ?? '1.0'),
-      offsetX: double.parse(element.getAttribute('offsetx') ?? '0'),
-      offsetY: double.parse(element.getAttribute('offsety') ?? '0'),
+      locked: element.getAttribute('locked') == '1',
+      opacity: _double(element, 'opacity', 1),
+      offsetX: _double(element, 'offsetx'),
+      offsetY: _double(element, 'offsety'),
       tintColor: _parseColor(element.getAttribute('tintcolor')),
-      parallaxX: double.parse(element.getAttribute('parallaxx') ?? '1.0'),
-      parallaxY: double.parse(element.getAttribute('parallaxy') ?? '1.0'),
+      parallaxX: _double(element, 'parallaxx', 1),
+      parallaxY: _double(element, 'parallaxy', 1),
       properties: _parseProperties(element),
       width: width,
       height: height,
@@ -272,90 +393,59 @@ class TileMapParser {
       flipHorizontal: flipH,
       flipVertical: flipV,
       flipDiagonal: flipD,
+      rawData: chunks.isEmpty ? raw : null,
+      chunks: chunks,
       encoding: encoding,
       compression: compression,
     );
   }
 
-  /// Decode the `data` element content.
-  static List<int> _decodeData(
-    XmlElement dataElement,
+  /// Decode the tiles of a `data` or `chunk` element: raw ids, flags kept.
+  static Uint32List _decodeData(
+    XmlElement element,
     LayerEncoding encoding,
     LayerCompression compression,
   ) {
     switch (encoding) {
       case LayerEncoding.csv:
-        return _decodeCsv(dataElement.innerText);
-
+        return _decodeCsv(element.innerText);
       case LayerEncoding.base64:
-        return _decodeBase64(dataElement.innerText.trim(), compression);
-
+        return _decodeBase64(element.innerText.trim(), compression);
       case LayerEncoding.xml:
-        return _decodeXmlTiles(dataElement);
+        return _decodeXmlTiles(element);
     }
   }
 
   /// Decode CSV-encoded tile data.
-  static List<int> _decodeCsv(String csvText) {
-    return csvText
-        .split(',')
-        .map((s) => s.trim())
-        .where((s) => s.isNotEmpty)
-        .map((s) => int.parse(s))
-        .toList();
-  }
+  static Uint32List _decodeCsv(String csvText) => Uint32List.fromList([
+    for (final s in csvText.split(','))
+      if (s.trim().isNotEmpty) int.parse(s.trim()).toUnsigned(32),
+  ]);
 
   /// Decode base64-encoded tile data with optional compression.
-  static List<int> _decodeBase64(
+  static Uint32List _decodeBase64(
     String base64Text,
     LayerCompression compression,
   ) {
     final bytes = base64Decode(base64Text);
-
-    Uint8List decompressed;
-    switch (compression) {
-      case LayerCompression.none:
-        decompressed = bytes;
-        break;
-
-      case LayerCompression.gzip:
-        decompressed = Uint8List.fromList(GZipDecoder().decodeBytes(bytes));
-        break;
-
-      case LayerCompression.zlib:
-        decompressed = Uint8List.fromList(ZLibDecoder().decodeBytes(bytes));
-        break;
-
-      case LayerCompression.zstd:
-        decompressed = const ZstdDecoder().decodeBytes(bytes);
-        break;
-    }
-
-    // Convert bytes to 32-bit unsigned integers (little-endian)
-    return _bytesToGids(decompressed);
+    final Uint8List plain = switch (compression) {
+      LayerCompression.none => bytes,
+      LayerCompression.gzip => Uint8List.fromList(
+        GZipDecoder().decodeBytes(bytes),
+      ),
+      LayerCompression.zlib => Uint8List.fromList(
+        ZLibDecoder().decodeBytes(bytes),
+      ),
+      LayerCompression.zstd => const ZstdDecoder().decodeBytes(bytes),
+    };
+    return TiledGid.fromBytes(plain);
   }
 
   /// Decode XML `tile` elements (unencoded format).
-  static List<int> _decodeXmlTiles(XmlElement dataElement) {
-    return dataElement
-        .findElements('tile')
-        .map((e) => int.parse(e.getAttribute('gid') ?? '0'))
-        .toList();
-  }
-
-  /// Convert byte buffer to list of 32-bit unsigned GIDs (little-endian).
-  static List<int> _bytesToGids(Uint8List bytes) {
-    final gids = <int>[];
-    for (int i = 0; i + 3 < bytes.length; i += 4) {
-      final gid =
-          bytes[i] |
-          (bytes[i + 1] << 8) |
-          (bytes[i + 2] << 16) |
-          (bytes[i + 3] << 24);
-      gids.add(gid & 0xFFFFFFFF);
-    }
-    return gids;
-  }
+  static Uint32List _decodeXmlTiles(XmlElement element) => Uint32List.fromList([
+    for (final e in element.findElements('tile'))
+      int.parse(e.getAttribute('gid') ?? '0').toUnsigned(32),
+  ]);
 
   /// Parse an `objectgroup` element.
   static Future<ObjectGroup> _parseObjectGroup(
@@ -368,15 +458,17 @@ class TileMapParser {
     }
 
     return ObjectGroup(
-      id: int.parse(element.getAttribute('id') ?? '0'),
+      id: _int(element, 'id'),
       name: element.getAttribute('name') ?? '',
+      className: element.getAttribute('class') ?? '',
       visible: element.getAttribute('visible') != '0',
-      opacity: double.parse(element.getAttribute('opacity') ?? '1.0'),
-      offsetX: double.parse(element.getAttribute('offsetx') ?? '0'),
-      offsetY: double.parse(element.getAttribute('offsety') ?? '0'),
+      locked: element.getAttribute('locked') == '1',
+      opacity: _double(element, 'opacity', 1),
+      offsetX: _double(element, 'offsetx'),
+      offsetY: _double(element, 'offsety'),
       tintColor: _parseColor(element.getAttribute('tintcolor')),
-      parallaxX: double.parse(element.getAttribute('parallaxx') ?? '1.0'),
-      parallaxY: double.parse(element.getAttribute('parallaxy') ?? '1.0'),
+      parallaxX: _double(element, 'parallaxx', 1),
+      parallaxY: _double(element, 'parallaxy', 1),
       properties: _parseProperties(element),
       drawOrder: DrawOrder.fromString(
         element.getAttribute('draworder') ?? 'topdown',
@@ -445,7 +537,7 @@ class TileMapParser {
       width: double.parse(attr('width', '0')),
       height: double.parse(attr('height', '0')),
       rotation: double.parse(attr('rotation', '0')),
-      gid: int.tryParse(attr('gid')),
+      gid: _gid(attr('gid')),
       visible: attr('visible', '1') != '0',
       templatePath: templatePath,
       polygon: _parsePolygon(instance) ?? _parsePolygon(template),
@@ -466,18 +558,22 @@ class TileMapParser {
     );
   }
 
+  /// A tile object's raw gid, flags kept, as an unsigned value.
+  static int? _gid(String? text) =>
+      text == null || text.isEmpty ? null : int.tryParse(text)?.toUnsigned(32);
+
   /// Parse an `object` element into a [TiledObject].
   static TiledObject _parseObject(XmlElement element) {
     return TiledObject(
-      id: int.parse(element.getAttribute('id') ?? '0'),
+      id: _int(element, 'id'),
       name: element.getAttribute('name') ?? '',
       type: element.getAttribute('type') ?? element.getAttribute('class') ?? '',
-      x: double.parse(element.getAttribute('x') ?? '0'),
-      y: double.parse(element.getAttribute('y') ?? '0'),
-      width: double.parse(element.getAttribute('width') ?? '0'),
-      height: double.parse(element.getAttribute('height') ?? '0'),
-      rotation: double.parse(element.getAttribute('rotation') ?? '0'),
-      gid: int.tryParse(element.getAttribute('gid') ?? ''),
+      x: _double(element, 'x'),
+      y: _double(element, 'y'),
+      width: _double(element, 'width'),
+      height: _double(element, 'height'),
+      rotation: _double(element, 'rotation'),
+      gid: _gid(element.getAttribute('gid')),
       visible: element.getAttribute('visible') != '0',
       templatePath: element.getAttribute('template'),
       polygon: _parsePolygon(element),
@@ -493,18 +589,24 @@ class TileMapParser {
   static ImageLayer _parseImageLayer(XmlElement element) {
     final imageElement = element.getElement('image');
     return ImageLayer(
-      id: int.parse(element.getAttribute('id') ?? '0'),
+      id: _int(element, 'id'),
       name: element.getAttribute('name') ?? '',
+      className: element.getAttribute('class') ?? '',
       visible: element.getAttribute('visible') != '0',
-      opacity: double.parse(element.getAttribute('opacity') ?? '1.0'),
-      offsetX: double.parse(element.getAttribute('offsetx') ?? '0'),
-      offsetY: double.parse(element.getAttribute('offsety') ?? '0'),
+      locked: element.getAttribute('locked') == '1',
+      opacity: _double(element, 'opacity', 1),
+      offsetX: _double(element, 'offsetx'),
+      offsetY: _double(element, 'offsety'),
       tintColor: _parseColor(element.getAttribute('tintcolor')),
-      parallaxX: double.parse(element.getAttribute('parallaxx') ?? '1.0'),
-      parallaxY: double.parse(element.getAttribute('parallaxy') ?? '1.0'),
+      parallaxX: _double(element, 'parallaxx', 1),
+      parallaxY: _double(element, 'parallaxy', 1),
       properties: _parseProperties(element),
       imageSource: imageElement?.getAttribute('source'),
       transparentColor: _parseColor(imageElement?.getAttribute('trans')),
+      imageWidth: int.tryParse(imageElement?.getAttribute('width') ?? ''),
+      imageHeight: int.tryParse(imageElement?.getAttribute('height') ?? ''),
+      repeatX: element.getAttribute('repeatx') == '1',
+      repeatY: element.getAttribute('repeaty') == '1',
     );
   }
 
@@ -520,15 +622,17 @@ class TileMapParser {
     }
 
     return GroupLayer(
-      id: int.parse(element.getAttribute('id') ?? '0'),
+      id: _int(element, 'id'),
       name: element.getAttribute('name') ?? '',
+      className: element.getAttribute('class') ?? '',
       visible: element.getAttribute('visible') != '0',
-      opacity: double.parse(element.getAttribute('opacity') ?? '1.0'),
-      offsetX: double.parse(element.getAttribute('offsetx') ?? '0'),
-      offsetY: double.parse(element.getAttribute('offsety') ?? '0'),
+      locked: element.getAttribute('locked') == '1',
+      opacity: _double(element, 'opacity', 1),
+      offsetX: _double(element, 'offsetx'),
+      offsetY: _double(element, 'offsety'),
       tintColor: _parseColor(element.getAttribute('tintcolor')),
-      parallaxX: double.parse(element.getAttribute('parallaxx') ?? '1.0'),
-      parallaxY: double.parse(element.getAttribute('parallaxy') ?? '1.0'),
+      parallaxX: _double(element, 'parallaxx', 1),
+      parallaxY: _double(element, 'parallaxy', 1),
       properties: _parseProperties(element),
       layers: layers,
     );
@@ -560,39 +664,37 @@ class TileMapParser {
     }).toList();
   }
 
-  /// Parse `properties` element.
+  /// Parse `properties` element, keeping each property's declared type.
   static TiledProperties _parseProperties(XmlElement element) {
     final propsElement = element.getElement('properties');
     if (propsElement == null) return const TiledProperties();
 
     final map = <String, dynamic>{};
+    final types = <String, String>{};
     for (final prop in propsElement.findElements('property')) {
       final name = prop.getAttribute('name') ?? '';
       final type = prop.getAttribute('type') ?? 'string';
       final value = prop.getAttribute('value') ?? prop.innerText;
+      types[name] = type;
 
       switch (type) {
         case 'int':
+        case 'object':
           map[name] = int.tryParse(value) ?? 0;
-          break;
         case 'float':
           map[name] = double.tryParse(value) ?? 0.0;
-          break;
         case 'bool':
           map[name] = value.toLowerCase() == 'true';
-          break;
         case 'color':
           map[name] = _parseColor(value);
-          break;
         case 'file':
         case 'string':
         default:
           map[name] = value;
-          break;
       }
     }
 
-    return TiledProperties(map);
+    return TiledProperties(map, types);
   }
 
   /// Merge two property sets (instance overrides template).
@@ -601,11 +703,24 @@ class TileMapParser {
     TiledProperties instance,
   ) {
     final merged = <String, dynamic>{...template.toMap()};
+    final types = <String, String>{
+      for (final key in template.keys) key: template.typeOf(key),
+    };
     for (final key in instance.keys) {
       merged[key] = instance[key];
+      types[key] = instance.typeOf(key);
     }
-    return TiledProperties(merged);
+    return TiledProperties(merged, types);
   }
+
+  static int _int(XmlElement element, String name, [int fallback = 0]) =>
+      int.tryParse(element.getAttribute(name) ?? '') ?? fallback;
+
+  static double _double(
+    XmlElement element,
+    String name, [
+    double fallback = 0,
+  ]) => double.tryParse(element.getAttribute(name) ?? '') ?? fallback;
 
   /// Parse a Tiled color string (#AARRGGBB or #RRGGBB).
   static Color? _parseColor(String? colorStr) {

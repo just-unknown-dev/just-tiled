@@ -64,7 +64,17 @@ class TiledMap {
   /// Custom map properties.
   final TiledProperties properties;
 
+  /// The map's class (Tiled 1.9+).
+  final String className;
+
+  /// The point parallax is measured from, in pixels (Tiled 1.8+).
+  final double parallaxOriginX;
+  final double parallaxOriginY;
+
   const TiledMap({
+    this.className = '',
+    this.parallaxOriginX = 0,
+    this.parallaxOriginY = 0,
     this.version = '1.0',
     this.tiledVersion,
     this.orientation = MapOrientation.orthogonal,

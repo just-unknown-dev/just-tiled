@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<map version="1.10" tiledversion="1.10.2" class="Level" orientation="orthogonal" renderorder="right-down" width="4" height="3" tilewidth="16" tileheight="16" parallaxoriginx="160" parallaxoriginy="90" backgroundcolor="#203040" infinite="0" nextlayerid="7" nextobjectid="8">
+ <properties>
+  <property name="dark" type="bool" value="false"/>
+  <property name="door" type="object" value="5"/>
+  <property name="fog" type="color" value="#80112233"/>
+  <property name="gravity" type="float" value="9.5"/>
+  <property name="lives" type="int" value="3"/>
+  <property name="music" type="file" value="music/level1.ogg"/>
+  <property name="title" value="First steps"/>
+ </properties>
+ <tileset firstgid="1" name="grass" class="Outdoor" tilewidth="16" tileheight="16" spacing="1" margin="2" tilecount="8" columns="4">
+  <tileoffset x="0" y="4"/>
+  <image source="grass.png" trans="ff00ff" width="70" height="36"/>
+  <transformations hflip="1" vflip="0" rotate="1" preferuntransformed="1"/>
+  <tile id="0" type="Ground" probability="0.5">
+   <properties>
+    <property name="solid" type="bool" value="true"/>
+   </properties>
+   <objectgroup draworder="index" id="2">
+    <object id="1" x="0" y="0" width="16" height="16"/>
+   </objectgroup>
+  </tile>
+  <tile id="3">
+   <objectgroup draworder="index" id="2">
+    <object id="1" x="0" y="16">
+     <polygon points="0,0 16,-16 16,0"/>
+    </object>
+   </objectgroup>
+  </tile>
+  <tile id="5">
+   <animation>
+    <frame tileid="5" duration="120"/>
+    <frame tileid="6" duration="80"/>
+   </animation>
+  </tile>
+  <wangsets>
+   <wangset name="Grass" type="corner" tile="0">
+    <wangcolor name="grass" color="#00ff00" tile="0" probability="1"/>
+    <wangcolor name="dirt" color="#804000" tile="1" probability="0.5"/>
+    <wangtile tileid="0" wangid="0,1,0,1,0,1,0,1"/>
+    <wangtile tileid="1" wangid="0,2,0,2,0,2,0,2"/>
+    <wangtile tileid="2" wangid="0,1,0,2,0,2,0,1"/>
+   </wangset>
+  </wangsets>
+ </tileset>
+ <layer id="1" name="Ground" class="Solid" width="4" height="3" locked="1" opacity="0.75" tintcolor="#ffcc8844" offsetx="8" offsety="-4" parallaxx="0.5" parallaxy="0.25">
+  <properties>
+   <property name="collides" type="bool" value="true"/>
+  </properties>
+  <data encoding="csv">
+1,2,3,4,
+2147483649,1073741826,536870915,3221225476,
+2684354561,1610612738,3758096387,0
+</data>
+ </layer>
+ <objectgroup id="2" name="Things" color="#a0a0a4" draworder="index">
+  <object id="1" name="Spawn" type="PlayerSpawn" x="16" y="32">
+   <point/>
+  </object>
+  <object id="2" name="Zone" type="Trigger" x="0" y="0" width="32" height="16" rotation="15">
+   <properties>
+    <property name="once" type="bool" value="true"/>
+   </properties>
+  </object>
+  <object id="3" x="8" y="8" width="10" height="6">
+   <ellipse/>
+  </object>
+  <object id="4" x="0" y="48">
+   <polygon points="0,0 16,-16 32,0"/>
+  </object>
+  <object id="5" x="0" y="40" visible="0">
+   <polyline points="0,0 10,5 20,0"/>
+  </object>
+  <object id="6" name="Sign" x="32" y="0" width="40" height="12">
+   <text wrap="1">Hello</text>
+  </object>
+  <object id="7" gid="2147483654" x="48" y="48" width="16" height="16"/>
+ </objectgroup>
+ <imagelayer id="3" name="Sky" repeatx="1" parallaxx="0.1">
+  <image source="sky.png" width="320" height="180"/>
+ </imagelayer>
+ <group id="4" name="Decor" opacity="0.5" offsetx="4">
+  <layer id="5" name="Flowers" width="4" height="3">
+   <data encoding="base64" compression="zlib">
+   eJwtyrENACAIALCiKJ7l/1cZEjs3MDCRWNgoHATX1+8BB6gAaA==
+  </data>
+  </layer>
+  <layer id="6" name="Moss" width="4" height="3" visible="0">
+   <data encoding="base64" compression="gzip">
+   H4sIAAAAAAAACi3KsQ0AIAgAsKIonuX/VxkSOzcwMJFY2CgcBNfX7wEo/0YZMAAAAA==
+  </data>
+  </layer>
+ </group>
+</map>

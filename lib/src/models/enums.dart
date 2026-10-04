@@ -81,6 +81,47 @@ enum DrawOrder {
   }
 }
 
+/// Which point of a tile object's image sits on the object's position.
+enum ObjectAlignment {
+  unspecified,
+  topleft,
+  top,
+  topright,
+  left,
+  center,
+  right,
+  bottomleft,
+  bottom,
+  bottomright;
+
+  static ObjectAlignment fromString(String? value) => ObjectAlignment.values
+      .firstWhere((e) => e.name == value, orElse: () => unspecified);
+}
+
+/// Whether a tileset's tiles draw at their own size or the map's grid size.
+enum TileRenderSize {
+  tile,
+  grid;
+
+  static TileRenderSize fromString(String? value) =>
+      TileRenderSize.values.firstWhere((e) => e.name == value,
+          orElse: () => tile);
+}
+
+/// How a tile drawn at the grid size fills its cell.
+enum FillMode {
+  stretch('stretch'),
+  preserveAspectFit('preserve-aspect-fit');
+
+  final String tmxValue;
+  const FillMode(this.tmxValue);
+
+  static FillMode fromString(String? value) => FillMode.values.firstWhere(
+    (e) => e.tmxValue == value,
+    orElse: () => stretch,
+  );
+}
+
 /// Tile data encoding in <data> element.
 enum LayerEncoding {
   base64,

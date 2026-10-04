@@ -1,9 +1,11 @@
 /// Tiled layer models.
 library;
 
+import 'dart:typed_data';
 import 'dart:ui';
 
 import 'enums.dart';
+import 'gid.dart';
 import 'tiled_object.dart';
 
 /// Base class for all layer types.
@@ -14,8 +16,14 @@ abstract class Layer {
   /// Layer name.
   final String name;
 
+  /// The layer's class (Tiled 1.9+; `type` before that).
+  final String className;
+
   /// Whether the layer is visible.
   final bool visible;
+
+  /// Whether the layer is locked against editing in Tiled.
+  final bool locked;
 
   /// Layer opacity (0.0–1.0).
   final double opacity;
@@ -41,7 +49,9 @@ abstract class Layer {
   const Layer({
     required this.id,
     this.name = '',
+    this.className = '',
     this.visible = true,
+    this.locked = false,
     this.opacity = 1.0,
     this.offsetX = 0,
     this.offsetY = 0,
@@ -52,7 +62,34 @@ abstract class Layer {
   }) : properties = properties ?? const TiledProperties();
 }
 
+/// A rectangle of an infinite map's tile layer.
+class TileChunk {
+  const TileChunk({
+    required this.x,
+    required this.y,
+    required this.width,
+    required this.height,
+    required this.data,
+  });
+
+  /// Top-left cell of the chunk, in tiles. May be negative.
+  final int x;
+  final int y;
+
+  /// Size in tiles — 16×16 unless the map says otherwise.
+  final int width;
+  final int height;
+
+  /// Raw global ids, flags included, row by row.
+  final Uint32List data;
+}
+
 /// A tile layer containing a grid of tile GIDs.
+///
+/// A finite layer holds its tiles in [data] (ids without flags) plus the
+/// three flip lists, and in [rawData] (ids with their flags) when parsed or
+/// built with it. An infinite map's layer holds [chunks] instead; [data] is
+/// then empty.
 class TileLayer extends Layer {
   /// Layer width in tiles.
   final int width;
@@ -72,6 +109,13 @@ class TileLayer extends Layer {
   /// Anti-diagonal flip flags per tile.
   final List<bool> flipDiagonal;
 
+  /// Raw global ids with every flag, including the hexagonal 120° one,
+  /// indexed like [data]. Null when the layer was built from [data] alone.
+  final Uint32List? rawData;
+
+  /// An infinite map's tiles; empty for a finite layer.
+  final List<TileChunk> chunks;
+
   /// Encoding used in the TMX source.
   final LayerEncoding encoding;
 
@@ -81,7 +125,9 @@ class TileLayer extends Layer {
   const TileLayer({
     required super.id,
     super.name,
+    super.className,
     super.visible,
+    super.locked,
     super.opacity,
     super.offsetX,
     super.offsetY,
@@ -95,9 +141,35 @@ class TileLayer extends Layer {
     this.flipHorizontal = const [],
     this.flipVertical = const [],
     this.flipDiagonal = const [],
+    this.rawData,
+    this.chunks = const [],
     this.encoding = LayerEncoding.csv,
     this.compression = LayerCompression.none,
   });
+
+  /// Whether the tiles are in [chunks] rather than [data].
+  bool get isChunked => chunks.isNotEmpty;
+
+  /// The raw global id (flags included) at [index] of a finite layer.
+  int rawGidAt(int index) {
+    final raw = rawData;
+    if (raw != null) return raw[index];
+    var flags = 0;
+    if (index < flipHorizontal.length && flipHorizontal[index]) {
+      flags |= TiledGid.flipHorizontal;
+    }
+    if (index < flipVertical.length && flipVertical[index]) {
+      flags |= TiledGid.flipVertical;
+    }
+    if (index < flipDiagonal.length && flipDiagonal[index]) {
+      flags |= TiledGid.flipDiagonal;
+    }
+    return TiledGid.compose(data[index], flags);
+  }
+
+  /// Every raw global id of a finite layer, row by row.
+  Uint32List get rawGids =>
+      rawData ?? Uint32List.fromList([for (var i = 0; i < data.length; i++) rawGidAt(i)]);
 }
 
 /// An object group layer containing map objects.
@@ -114,7 +186,9 @@ class ObjectGroup extends Layer {
   const ObjectGroup({
     required super.id,
     super.name,
+    super.className,
     super.visible,
+    super.locked,
     super.opacity,
     super.offsetX,
     super.offsetY,
@@ -136,11 +210,21 @@ class ImageLayer extends Layer {
   /// Transparent color key.
   final Color? transparentColor;
 
+  /// Image size in pixels, when the file says.
+  final int? imageWidth;
+  final int? imageHeight;
+
+  /// Whether the image repeats across the map horizontally / vertically.
+  final bool repeatX;
+  final bool repeatY;
+
   /// Creates an image layer.
   const ImageLayer({
     required super.id,
     super.name,
+    super.className,
     super.visible,
+    super.locked,
     super.opacity,
     super.offsetX,
     super.offsetY,
@@ -150,6 +234,10 @@ class ImageLayer extends Layer {
     super.properties,
     this.imageSource,
     this.transparentColor,
+    this.imageWidth,
+    this.imageHeight,
+    this.repeatX = false,
+    this.repeatY = false,
   });
 }
 
@@ -162,7 +250,9 @@ class GroupLayer extends Layer {
   const GroupLayer({
     required super.id,
     super.name,
+    super.className,
     super.visible,
+    super.locked,
     super.opacity,
     super.offsetX,
     super.offsetY,

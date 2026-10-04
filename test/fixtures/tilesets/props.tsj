@@ -1,0 +1,26 @@
+{ "columns":2,
+ "image":"..\/props.png",
+ "imageheight":16,
+ "imagewidth":32,
+ "margin":0,
+ "name":"props",
+ "spacing":0,
+ "tilecount":2,
+ "tiledversion":"1.10.2",
+ "tileheight":16,
+ "tiles":[
+        {
+         "id":1,
+         "probability":0.25,
+         "properties":[
+                {
+                 "name":"damage",
+                 "type":"int",
+                 "value":2
+                }],
+         "type":"Spike"
+        }],
+ "tilewidth":16,
+ "type":"tileset",
+ "version":"1.10"
+}

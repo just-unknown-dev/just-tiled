@@ -1,6 +1,6 @@
 name: just_tiled
 description: "Tiled Map Editor (TMX/TSX) parser and renderer for 2D game engines."
-version: 0.3.0
+version: 0.4.0
 homepage: https://github.com/just-unknown-dev/just-tiled
 repository: https://github.com/just-unknown-dev/just-tiled
 issue_tracker: https://github.com/just-unknown-dev/just-tiled/issues
