@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.4.1] - 2026-10-05
+
+### Changed
+- **zlib and gzip now come from `just_deflate`**, a pure Dart package with no dependencies. The `archive` package, and with it `path` and `posix`, is gone. Maps read and write as before. Compressed output is about the same size, but the bytes differ from `archive`'s.
+- Compressed tile data may not unpack to more than its layer's or chunk's `width × height` ids. Damaged or hostile data now throws `FormatException` rather than filling memory.
+
+### Tests
+- 5 more for the size limit, in TMX (zlib and gzip) and TMJ (98 total).
+
+---
 ## [0.4.0] - 2026-10-04
 
 ### Added
@@ -41,7 +51,7 @@
 ## [0.2.0] - 2026-03-15
 
 ### Added
-- **Example** (`example/example.dart`) — full Flutter app demonstrating map parsing, texture atlas construction, `TileMapRenderer` usage, object querying, custom property access, and 
+- **Example** (`example/example.dart`) — full Flutter app demonstrating map parsing, texture atlas construction, `TileMapRenderer` usage, object querying, custom property access, and
 ---
 
 ## [0.1.0] - 2026-03-15
@@ -51,7 +61,7 @@
 - **TileMapParser** — async TMX/TSX parser built on the `xml` package.
   - `TileMapParser.parse(String tmxXml, {TsxProvider?})` returns a fully-populated `TiledMap`.
   - **Encodings**: CSV, Base64, XML (unencoded).
-  - **Compression**: None, GZIP, Zlib (via `archive`), Zstd (via `just_zstd`).
+  - **Compression**: None, GZIP, Zlib (via `archive`; `just_deflate` since 0.4.1), Zstd (via `just_zstd`).
   - Decodes flip bits (horizontal, vertical, diagonal / anti-diagonal) from GIDs and stores them separately.
   - Parses embedded and external tileset references; resolves `.tsx` files via the injected `TsxProvider`.
   - Parses tile animation frame sequences (`<animation>` elements).

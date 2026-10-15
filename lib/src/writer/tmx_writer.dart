@@ -4,7 +4,7 @@ library;
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:archive/archive.dart';
+import 'package:just_deflate/just_deflate.dart';
 import 'package:xml/xml.dart';
 
 import '../models/models.dart';
@@ -252,8 +252,8 @@ abstract final class TmxWriter {
     }
     final Uint8List bytes = TiledGid.toBytes(gids);
     final List<int> packed = switch (enc) {
-      TmxDataEncoding.base64Zlib => ZLibEncoder().encodeBytes(bytes),
-      TmxDataEncoding.base64Gzip => GZipEncoder().encodeBytes(bytes),
+      TmxDataEncoding.base64Zlib => const ZlibCodec().encode(bytes),
+      TmxDataEncoding.base64Gzip => const GzipCodec().encode(bytes),
       _ => bytes,
     };
     return '\n   ${base64Encode(packed)}\n  ';

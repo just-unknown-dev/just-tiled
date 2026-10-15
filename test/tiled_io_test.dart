@@ -11,6 +11,7 @@ import 'dart:io';
 import 'dart:ui';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:just_deflate/just_deflate.dart';
 import 'package:just_tiled/just_tiled.dart';
 
 /// Reads external tilesets from the fixtures folder.
@@ -328,5 +329,71 @@ void main() {
     expect(TiledGid.idOf(0xF0000001), 1);
     expect(TiledGid.flagsOf(0xF0000001), TiledGid.flagMask);
     expect(TiledGid.compose(7, TiledGid.flipVertical), 0x40000007);
+  });
+
+  group('compressed data may not unpack past its layer', () {
+    String packed(int ids, String compression) {
+      final bytes = TiledGid.toBytes(List.filled(ids, 1));
+      return base64Encode(
+        compression == 'zlib'
+            ? const ZlibCodec().encode(bytes)
+            : const GzipCodec().encode(bytes),
+      );
+    }
+
+    // A 2 x 2 layer: four ids.
+    String tmx(int ids, String compression) =>
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<map version="1.10" orientation="orthogonal" renderorder="right-down"'
+        ' width="2" height="2" tilewidth="16" tileheight="16" infinite="0">\n'
+        ' <layer id="1" name="L" width="2" height="2">\n'
+        '  <data encoding="base64" compression="$compression">'
+        '${packed(ids, compression)}</data>\n'
+        ' </layer>\n'
+        '</map>\n';
+
+    String tmj(int ids) => jsonEncode({
+      'type': 'map',
+      'orientation': 'orthogonal',
+      'renderorder': 'right-down',
+      'width': 2,
+      'height': 2,
+      'tilewidth': 16,
+      'tileheight': 16,
+      'infinite': false,
+      'layers': [
+        {
+          'type': 'tilelayer',
+          'id': 1,
+          'name': 'L',
+          'width': 2,
+          'height': 2,
+          'encoding': 'base64',
+          'compression': 'zlib',
+          'data': packed(ids, 'zlib'),
+        },
+      ],
+      'tilesets': <Object>[],
+    });
+
+    for (final compression in ['zlib', 'gzip']) {
+      test('$compression: exactly the layer reads', () async {
+        final map = await TileMapParser.parse(tmx(4, compression));
+        expect((map.layers.single as TileLayer).data, [1, 1, 1, 1]);
+      });
+
+      test('$compression: one id more is refused', () {
+        expect(
+          TileMapParser.parse(tmx(5, compression)),
+          throwsA(isA<FormatException>()),
+        );
+      });
+    }
+
+    test('TMJ: exactly the layer reads, one id more is refused', () async {
+      final map = await TmjParser.parse(tmj(4));
+      expect((map.layers.single as TileLayer).data, [1, 1, 1, 1]);
+      expect(TmjParser.parse(tmj(5)), throwsA(isA<FormatException>()));
+    });
   });
 }

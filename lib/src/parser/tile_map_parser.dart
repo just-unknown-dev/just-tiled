@@ -8,7 +8,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'dart:ui';
 
-import 'package:archive/archive.dart';
+import 'package:just_deflate/just_deflate.dart';
 import 'package:just_zstd/just_zstd.dart';
 import 'package:xml/xml.dart';
 
@@ -352,12 +352,17 @@ class TileMapParser {
               y: _int(chunk, 'y'),
               width: _int(chunk, 'width'),
               height: _int(chunk, 'height'),
-              data: _decodeData(chunk, encoding, compression),
+              data: _decodeData(
+                chunk,
+                encoding,
+                compression,
+                _int(chunk, 'width') * _int(chunk, 'height'),
+              ),
             ),
           );
         }
       } else {
-        raw = _decodeData(dataElement, encoding, compression);
+        raw = _decodeData(dataElement, encoding, compression, width * height);
       }
     }
 
@@ -400,17 +405,19 @@ class TileMapParser {
     );
   }
 
-  /// Decode the tiles of a `data` or `chunk` element: raw ids, flags kept.
+  /// Decode the tiles of a `data` or `chunk` element of [cells] tiles: raw
+  /// ids, flags kept.
   static Uint32List _decodeData(
     XmlElement element,
     LayerEncoding encoding,
     LayerCompression compression,
+    int cells,
   ) {
     switch (encoding) {
       case LayerEncoding.csv:
         return _decodeCsv(element.innerText);
       case LayerEncoding.base64:
-        return _decodeBase64(element.innerText.trim(), compression);
+        return _decodeBase64(element.innerText.trim(), compression, cells);
       case LayerEncoding.xml:
         return _decodeXmlTiles(element);
     }
@@ -423,18 +430,26 @@ class TileMapParser {
   ]);
 
   /// Decode base64-encoded tile data with optional compression.
+  ///
+  /// [cells] is how many tiles the data holds, so zlib or gzip data can't
+  /// unpack to more than their bytes: damaged or hostile data fails rather
+  /// than filling memory. 0 (no size given) sets no limit.
   static Uint32List _decodeBase64(
     String base64Text,
     LayerCompression compression,
+    int cells,
   ) {
     final bytes = base64Decode(base64Text);
+    final limit = cells > 0 ? cells * 4 : null;
     final Uint8List plain = switch (compression) {
       LayerCompression.none => bytes,
-      LayerCompression.gzip => Uint8List.fromList(
-        GZipDecoder().decodeBytes(bytes),
+      LayerCompression.gzip => const GzipCodec().decode(
+        bytes,
+        maxOutputSize: limit,
       ),
-      LayerCompression.zlib => Uint8List.fromList(
-        ZLibDecoder().decodeBytes(bytes),
+      LayerCompression.zlib => const ZlibCodec().decode(
+        bytes,
+        maxOutputSize: limit,
       ),
       LayerCompression.zstd => const ZstdDecoder().decodeBytes(bytes),
     };

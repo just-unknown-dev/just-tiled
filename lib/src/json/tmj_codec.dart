@@ -5,7 +5,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'dart:ui';
 
-import 'package:archive/archive.dart';
+import 'package:just_deflate/just_deflate.dart';
 import 'package:just_zstd/just_zstd.dart';
 
 import '../models/models.dart';
@@ -240,11 +240,19 @@ abstract final class TmjParser {
               y: _int(c['y']),
               width: _int(c['width']),
               height: _int(c['height']),
-              data: _data(c['data'], compression),
+              data: _data(
+                c['data'],
+                compression,
+                _int(c['width']) * _int(c['height']),
+              ),
             ),
         ];
         final raw = chunks.isEmpty
-            ? _data(json['data'], compression)
+            ? _data(
+                json['data'],
+                compression,
+                _int(json['width']) * _int(json['height']),
+              )
             : Uint32List(0);
         return TileLayer(
           id: id,
@@ -338,7 +346,14 @@ abstract final class TmjParser {
     }
   }
 
-  static Uint32List _data(Object? data, LayerCompression compression) {
+  /// Tile ids from a layer's or chunk's `data` of [cells] tiles: a list, or
+  /// base64 text, compressed or not. Compressed data may not unpack to more
+  /// than [cells] ids (0 sets no limit).
+  static Uint32List _data(
+    Object? data,
+    LayerCompression compression,
+    int cells,
+  ) {
     if (data is List) {
       return Uint32List.fromList([
         for (final v in data) (v as num).toInt().toUnsigned(32),
@@ -346,13 +361,16 @@ abstract final class TmjParser {
     }
     if (data is String) {
       final bytes = base64Decode(data.trim());
+      final limit = cells > 0 ? cells * 4 : null;
       final Uint8List plain = switch (compression) {
         LayerCompression.none => bytes,
-        LayerCompression.gzip => Uint8List.fromList(
-          GZipDecoder().decodeBytes(bytes),
+        LayerCompression.gzip => const GzipCodec().decode(
+          bytes,
+          maxOutputSize: limit,
         ),
-        LayerCompression.zlib => Uint8List.fromList(
-          ZLibDecoder().decodeBytes(bytes),
+        LayerCompression.zlib => const ZlibCodec().decode(
+          bytes,
+          maxOutputSize: limit,
         ),
         LayerCompression.zstd => const ZstdDecoder().decodeBytes(bytes),
       };
@@ -604,7 +622,7 @@ abstract final class TmjWriter {
     switch (l) {
       case TileLayer():
         Object data(List<int> ids) => base64Zlib
-            ? base64Encode(ZLibEncoder().encodeBytes(TiledGid.toBytes(ids)))
+            ? base64Encode(const ZlibCodec().encode(TiledGid.toBytes(ids)))
             : [for (final id in ids) id.toUnsigned(32)];
         return {
           ..._common(l),
