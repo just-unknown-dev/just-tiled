@@ -11,6 +11,7 @@ import 'wang.dart';
 /// How tile objects of an isometric tileset are laid out in Tiled's
 /// tileset view — the `<grid>` element.
 class TilesetGrid {
+  /// A grid of [width] by [height] pixel cells.
   const TilesetGrid({
     this.orientation = MapOrientation.orthogonal,
     this.width = 0,
@@ -19,12 +20,17 @@ class TilesetGrid {
 
   /// `orthogonal` or `isometric`.
   final MapOrientation orientation;
+
+  /// Cell width in pixels.
   final int width;
+
+  /// Cell height in pixels.
   final int height;
 }
 
 /// Which ways a Wang brush may turn this tileset's tiles to find a match.
 class TilesetTransformations {
+  /// Transformations, all off unless given.
   const TilesetTransformations({
     this.hflip = false,
     this.vflip = false,
@@ -32,11 +38,19 @@ class TilesetTransformations {
     this.preferUntransformed = false,
   });
 
+  /// Tiles may be mirrored left to right.
   final bool hflip;
+
+  /// Tiles may be mirrored top to bottom.
   final bool vflip;
+
+  /// Tiles may be turned in 90° steps.
   final bool rotate;
+
+  /// Tiles as drawn are preferred over transformed ones.
   final bool preferUntransformed;
 
+  /// Whether any setting is on.
   bool get any => hflip || vflip || rotate || preferUntransformed;
 }
 
@@ -114,6 +128,7 @@ class Tileset {
   /// External TSX source file (null if embedded).
   final String? source;
 
+  /// A tileset whose tiles are numbered from [firstGid] in the map.
   const Tileset({
     required this.firstGid,
     this.name = '',

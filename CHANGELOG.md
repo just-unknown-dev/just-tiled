@@ -1,13 +1,34 @@
 # Changelog
 
-## [0.4.1] - 2026-10-05
+## [0.4.1] - 2026-10-15
+
+### Fixed
+- **Flipped and turned tiles drew wrong.** `TileMapRenderer` mirrored a tile by reversing its source rectangle, which `drawRawAtlas` doesn't do: a mirrored tile drew unmirrored, a tile away from its cell, and the diagonal flips D+H and D+V turned the wrong way. Every flip and turn now draws as in Tiled, still in one call per layer. A layer with mirrored tiles draws from the new `TextureAtlas.mirroredImage`: the tileset image with a mirrored copy beside it.
+- **Tiles are placed as Tiled places them.** A tile larger than the grid stands on its cell's bottom-left corner, moved by the tileset's `tileOffset`; it was drawn from the cell's top-left. Isometric tiles were drawn half a tile to the right.
+- **Culling works for every orientation**, not only orthogonal layers of over 10,000 cells. It no longer builds new buffers every frame, keeps the layer's tint (culled layers lost it), and still draws in one call. `drawRawAtlas` gets the tiles' bounds as its cull rectangle, not the view.
+- **`DefaultTsxProvider` collapses `.` and `..`**, so a tileset in a folder beside the map's (`../tilesets/terrain.tsx`) loads. `basePath` is the map's folder.
+- **A template's tile object kept the template's tile number.** A template numbers its tile from its own tileset; the gid is now renumbered to the map's first gid for that tileset, flags kept.
+- **Properties of Tiled's custom types (1.8+) lost their type.** A property's `propertytype`, the enum's or class's name, is now read and written back. A `class` property's members were read as a whitespace string and written back as one; they are now nested `TiledProperties`, written back as members.
+- **Broken TMJ and TSJ files threw `TypeError`.** They now throw `FormatException`, as broken TMX files do, and `TmjParser.parse` reports invalid JSON through its future rather than throwing at once.
+- **Zstandard tile data could be read wrong without an error.** The Zstandard decoder (`just_zstd` 0.2.0) reads only uncompressed blocks and returns wrong bytes for compressed ones. Zstandard data must now unpack to exactly its layer's or chunk's tiles, or throws `FormatException`.
+- **`SpatialHashGrid`**: inserting an item again left a stale copy at its old place, which queries kept finding. A query the size of the world, or an item that large, walked every cell inside it; both are now checked directly. Bounds that aren't finite throw `ArgumentError`.
+- Polygon and polyline points separated by any whitespace, not just single spaces, are read.
+
+### Added
+- `TileMapRenderer` draws infinite maps' chunked layers, draws an orthogonal map's tiles in its render order, and reports `tileCount`.
+- `TextureAtlas.mirroredImage` and `getMirroredSourceRect`.
+- `TiledProperties.propertyTypeOf` and `getClass`; a `TiledProperties` constructor argument for custom types.
+- `DefaultTsxProvider.resolve`, the asset key a path from the map loads from.
+- Documentation for every public member, and pubspec topics.
 
 ### Changed
 - **zlib and gzip now come from `just_deflate`**, a pure Dart package with no dependencies. The `archive` package, and with it `path` and `posix`, is gone. Maps read and write as before. Compressed output is about the same size, but the bytes differ from `archive`'s.
 - Compressed tile data may not unpack to more than its layer's or chunk's `width × height` ids. Damaged or hostile data now throws `FormatException` rather than filling memory.
+- `xml` may be 6.5 to 7.x. The Flutter floor is 3.41.0, the first with Dart 3.11, which the package already needed.
+- The code is `dart format`ted.
 
 ### Tests
-- 5 more for the size limit, in TMX (zlib and gzip) and TMJ (98 total).
+- 136 in all. New: the renderer drawn into images (every flip and turn, tall tiles and offsets, isometric, chunks, culling against drawing everything in each orientation, tint, render order, the mirrored image), asset paths through a mocked bundle, templates, custom-type properties through every reader and writer, broken files, Zstandard, and the spatial grid at its edges. The renderer tests fail on 0.4.0's renderer.
 
 ---
 ## [0.4.0] - 2026-10-04

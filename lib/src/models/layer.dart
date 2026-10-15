@@ -46,6 +46,7 @@ abstract class Layer {
   /// Custom properties.
   final TiledProperties properties;
 
+  /// The settings every layer has; [id] is unique within the map.
   const Layer({
     required this.id,
     this.name = '',
@@ -64,6 +65,8 @@ abstract class Layer {
 
 /// A rectangle of an infinite map's tile layer.
 class TileChunk {
+  /// A chunk of [width] by [height] tiles whose top-left cell is ([x],
+  /// [y]).
   const TileChunk({
     required this.x,
     required this.y,
@@ -72,12 +75,16 @@ class TileChunk {
     required this.data,
   });
 
-  /// Top-left cell of the chunk, in tiles. May be negative.
+  /// Column of the chunk's top-left cell, in tiles. May be negative.
   final int x;
+
+  /// Row of the chunk's top-left cell, in tiles. May be negative.
   final int y;
 
-  /// Size in tiles — 16×16 unless the map says otherwise.
+  /// Width in tiles — 16 unless the map says otherwise.
   final int width;
+
+  /// Height in tiles — 16 unless the map says otherwise.
   final int height;
 
   /// Raw global ids, flags included, row by row.
@@ -122,6 +129,8 @@ class TileLayer extends Layer {
   /// Compression used in the TMX source.
   final LayerCompression compression;
 
+  /// A layer of [width] by [height] cells: tiles in [data] and the flip
+  /// lists (or [rawData]), or, for an infinite map, in [chunks].
   const TileLayer({
     required super.id,
     super.name,
@@ -169,7 +178,8 @@ class TileLayer extends Layer {
 
   /// Every raw global id of a finite layer, row by row.
   Uint32List get rawGids =>
-      rawData ?? Uint32List.fromList([for (var i = 0; i < data.length; i++) rawGidAt(i)]);
+      rawData ??
+      Uint32List.fromList([for (var i = 0; i < data.length; i++) rawGidAt(i)]);
 }
 
 /// An object group layer containing map objects.
@@ -183,6 +193,7 @@ class ObjectGroup extends Layer {
   /// Objects within this group.
   final List<TiledObject> objects;
 
+  /// An object layer holding [objects].
   const ObjectGroup({
     required super.id,
     super.name,
@@ -210,12 +221,16 @@ class ImageLayer extends Layer {
   /// Transparent color key.
   final Color? transparentColor;
 
-  /// Image size in pixels, when the file says.
+  /// Image width in pixels, when the file says.
   final int? imageWidth;
+
+  /// Image height in pixels, when the file says.
   final int? imageHeight;
 
-  /// Whether the image repeats across the map horizontally / vertically.
+  /// Whether the image repeats across the map horizontally.
   final bool repeatX;
+
+  /// Whether the image repeats across the map vertically.
   final bool repeatY;
 
   /// Creates an image layer.

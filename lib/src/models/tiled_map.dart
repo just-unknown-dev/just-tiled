@@ -67,10 +67,14 @@ class TiledMap {
   /// The map's class (Tiled 1.9+).
   final String className;
 
-  /// The point parallax is measured from, in pixels (Tiled 1.8+).
+  /// X of the point parallax is measured from, in pixels (Tiled 1.8+).
   final double parallaxOriginX;
+
+  /// Y of the point parallax is measured from, in pixels (Tiled 1.8+).
   final double parallaxOriginY;
 
+  /// A map of [width] by [height] tiles, each [tileWidth] by [tileHeight]
+  /// pixels.
   const TiledMap({
     this.className = '',
     this.parallaxOriginX = 0,
@@ -118,8 +122,10 @@ class TiledMap {
     return result;
   }
 
-  /// Map pixel dimensions.
+  /// Map width in pixels, on an orthogonal grid.
   int get pixelWidth => width * tileWidth;
+
+  /// Map height in pixels, on an orthogonal grid.
   int get pixelHeight => height * tileHeight;
 
   List<T> _collectLayers<T extends Layer>(List<Layer> layers) {

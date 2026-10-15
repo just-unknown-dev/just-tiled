@@ -3,24 +3,30 @@ library;
 
 import 'package:flutter/services.dart' show rootBundle;
 
+import 'paths.dart';
+
 /// Dependency injection interface for loading external .tsx tileset files
 /// and .tx object template files.
 ///
 /// Implement this to provide custom file resolution (e.g., from network,
 /// file system, or custom asset bundle).
 abstract class TsxProvider {
-  /// Resolve and load an external .tsx tileset file.
+  /// Lets subclasses be const.
+  const TsxProvider();
+
+  /// Resolve and load an external tileset file: TSX, or TSJ (`.tsj` or
+  /// `.json`), which the parsers tell apart by the file ending.
   ///
-  /// [source] is the path/URI as written in the TMX tileset element's
-  /// `source` attribute.
+  /// [source] is the path as written in the map's tileset `source`
+  /// attribute: relative to the map file.
   ///
-  /// Returns the raw XML string content of the .tsx file.
+  /// Returns the file's text.
   Future<String> getTsx(String source);
 
   /// Resolve and load an external .tx template file.
   ///
-  /// [source] is the path/URI as written in the object element's
-  /// `template` attribute.
+  /// [source] is the path as written in the object's `template` attribute:
+  /// relative to the map file.
   ///
   /// Returns the raw XML string content of the .tx file.
   Future<String> getTemplate(String source);
@@ -30,33 +36,37 @@ abstract class TsxProvider {
 ///
 /// Expects tileset and template files to be declared in pubspec.yaml assets.
 class DefaultTsxProvider implements TsxProvider {
-  /// Base path prefix for asset resolution.
+  /// The folder the map is in, as an asset path: the paths in the map are
+  /// read relative to it.
   final String basePath;
 
-  /// Create a provider with an optional [basePath] prefix.
+  /// Create a provider for maps in the asset folder [basePath].
   ///
-  /// For example, if your TMX files are in `assets/maps/` and reference
-  /// tilesets as `../tilesets/terrain.tsx`, set [basePath] to `assets/`.
+  /// For example, for a map at `assets/maps/level1.tmx` whose tilesets are
+  /// `../tilesets/terrain.tsx`, set [basePath] to `assets/maps`; the
+  /// tileset loads from `assets/tilesets/terrain.tsx`.
   const DefaultTsxProvider({this.basePath = ''});
 
   @override
-  Future<String> getTsx(String source) async {
-    final path = _resolvePath(source);
-    return await rootBundle.loadString(path);
-  }
+  Future<String> getTsx(String source) =>
+      rootBundle.loadString(resolve(source));
 
   @override
-  Future<String> getTemplate(String source) async {
-    final path = _resolvePath(source);
-    return await rootBundle.loadString(path);
-  }
+  Future<String> getTemplate(String source) =>
+      rootBundle.loadString(resolve(source));
 
-  String _resolvePath(String source) {
-    if (source.startsWith('/') || source.startsWith('assets/')) {
-      return source;
+  /// The asset key [source], a path from the map, loads from: [basePath]
+  /// and [source] joined, with `\` read as `/` and `.` and `..` collapsed.
+  ///
+  /// A [source] that starts with `assets/` or `/` is taken from the root of
+  /// the asset bundle instead, without [basePath].
+  String resolve(String source) {
+    final path = source.replaceAll('\\', '/');
+    if (path.startsWith('/') ||
+        path.startsWith('assets/') ||
+        basePath.isEmpty) {
+      return normalizePath(path);
     }
-    final resolved = basePath.isEmpty ? source : '$basePath/$source';
-    // Normalize path separators
-    return resolved.replaceAll('\\', '/');
+    return normalizePath('$basePath/$path');
   }
 }

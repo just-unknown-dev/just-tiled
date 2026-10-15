@@ -13,13 +13,14 @@ The package doesn't depend on any game engine. `just_game_engine` uses it to imp
 - **Every orientation** — orthogonal, isometric, staggered (X/Y), hexagonal.
 - **Every layer type** — tile, object, image and nested group layers.
 - **Infinite maps** — chunked tile layers (`TileLayer.chunks`).
-- **Every tile encoding** — CSV, Base64 and XML; uncompressed, gzip, zlib or Zstandard.
+- **Every tile encoding** — CSV, Base64 and XML; uncompressed, gzip or zlib. Zstandard [in part](#zstandard).
 - **Raw tile ids** — all four of Tiled's flags kept, including the hexagonal 120° one (`TileLayer.rawData`, `TiledGid`).
 - **Tilesets** — per-tile properties, animation frames, per-tile images, collision shapes, Wang sets (corner, edge, mixed).
-- **Objects** — rectangle, ellipse, point, polygon, polyline, tile and text objects; templates.
-- **Typed custom properties** — `string`, `int`, `float`, `bool`, `color`, `file`, `object`, each written back as its own type.
-- **Renderer** — one `drawRawAtlas` call per layer, tile flips, opacity, tint, layer offsets, tile-level culling for large orthogonal layers.
+- **Objects** — rectangle, ellipse, point, polygon, polyline, tile and text objects; templates, their tiles renumbered for the map.
+- **Typed custom properties** — `string`, `int`, `float`, `bool`, `color`, `file`, `object`, each written back as its own type, and Tiled's custom types: enums and classes.
+- **Renderer** — one `drawRawAtlas` call per layer, finite or infinite; every flip and turn; tiles placed as Tiled places them; opacity, tint, layer offsets, render order; culling for every orientation.
 - **Spatial hash grid** — fast rectangle, point and radius queries for collision and culling.
+- **Every platform** — Android, iOS, Linux, macOS, Windows and the web, compiled to JavaScript or WebAssembly. Pure Dart: no native code.
 
 ---
 
@@ -29,7 +30,7 @@ Add `just_tiled` to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  just_tiled: ^0.4.0
+  just_tiled: ^0.4.1
 ```
 
 Put your maps, tilesets and images under `assets/` and declare them:
@@ -73,6 +74,8 @@ final map = await TmjParser.parse(
 
 Both give the same `TiledMap`. A TMJ map keeps an object's template path (`templatePath`) but doesn't load the template; a TMX map does.
 
+A file that isn't a valid map or tileset throws a `FormatException`, from either reader.
+
 ### A tileset on its own
 
 ```dart
@@ -84,7 +87,7 @@ final props = TmjParser.parseTileset(tsjText);       // .tsj
 
 The parsers load external tilesets and templates through a `TsxProvider`. Without one, an external tileset is left with only its `firstGid` and `source`.
 
-`DefaultTsxProvider` reads from the asset bundle. It joins `basePath` and the path as written in the map, and doesn't collapse `../`, so keep tilesets in the map's folder or below it. For anything else, write your own provider:
+`DefaultTsxProvider` reads from the asset bundle. Set `basePath` to the map's folder: it joins that and the path as written in the map, collapsing `.` and `..`, so `../tilesets/terrain.tsx` from `assets/maps` loads `assets/tilesets/terrain.tsx`. `resolve(source)` tells you the asset key. For anything else, write your own provider:
 
 ```dart
 import 'dart:io';
@@ -131,6 +134,16 @@ if (props.has('speed')) {
 
 props.typeOf('door'); // 'object' — an object property holds the object's id
 ```
+
+Properties of Tiled's custom types (Tiled 1.8+) keep the type's name, and a class keeps its members:
+
+```dart
+props.propertyTypeOf('facing'); // 'Direction', an enum
+final stats = props.getClass('stats'); // the members, as TiledProperties
+final hp = stats?.getInt('hp');
+```
+
+A TMJ file gives a class's members as bare values, so a member's type is read from its value there: a colour comes back as its `#rrggbb` text.
 
 ### Raw tile ids and flags
 
@@ -208,24 +221,26 @@ A tileset's `imageSource` is relative to the file that declares the tileset: the
 
 ### 2. Make the renderers
 
-A renderer draws one tile layer's tiles from one atlas. For a layer that uses more than one tileset, make one per atlas:
+A renderer draws one tile layer's tiles from one atlas, finite or infinite. For a layer that uses more than one tileset, make one per atlas:
 
 ```dart
 final renderers = [
   for (final layer in map.tileLayers)
-    if (layer.visible && !layer.isChunked)
+    if (layer.visible)
       for (final atlas in atlases)
         TileMapRenderer(map: map, tileLayer: layer, atlas: atlas)..compile(),
 ];
 ```
 
+Tiles are placed as Tiled places them: a tile's bottom-left corner on its cell's, moved by the tileset's `tileOffset`, so tiles taller than the grid reach up over the row above. They draw in the map's render order (orthogonal maps; others draw right-down), with every flip and 90° turn. `canvas.drawRawAtlas` can turn a tile but not mirror it, so a layer with mirrored tiles draws from `TextureAtlas.mirroredImage`: the tileset image with a mirrored copy beside it (below it, for a wide image), made once, the first time it's needed.
+
 Call `invalidate()` after changing a layer's tiles; the next `render` recompiles it.
 
-When you're done, dispose each atlas once (`TextureAtlas.dispose()`, or `TextureAtlasCollection.dispose()` for a list). `TileMapRenderer.dispose()` disposes its atlas's image too, so don't call it on renderers that share an atlas.
+When you're done, dispose each atlas once (`TextureAtlas.dispose()`, or `TextureAtlasCollection.dispose()` for a list). `TileMapRenderer.dispose()` disposes its atlas's images too, so don't call it on renderers that share an atlas.
 
 ### 3. Draw in a `CustomPainter`
 
-`render` doesn't move the canvas: translate it to your camera first. `visibleBounds` is the part of the world on screen, used for culling; pass `null` to draw every tile.
+`render` doesn't move the canvas: translate it to your camera first (its `cameraOffset` argument isn't used). `visibleBounds` is the part of the world on screen: only the tiles that can show inside it are drawn, still in one call. Pass `null` to draw every tile.
 
 ```dart
 @override
@@ -244,13 +259,11 @@ void paint(Canvas canvas, Size size) {
 
 ### What the renderer doesn't do
 
-- **Infinite maps.** Chunked layers aren't drawn; read `chunks` yourself.
 - **Image-collection tilesets** (`isImageCollection`), which have no single image to make an atlas from.
 - **Animated tiles.** Frames are read (`Tile.animation`), but a tile draws its first image.
+- **Scaling tiles to the grid** (`TileRenderSize.grid`). Tiles draw at their own size.
 - **Parallax, the hexagonal 120° flag, and a group's offset, opacity and tint.** These are read but not applied.
 - **Hidden layers.** Skip layers whose `visible` is false, as above.
-
-Orthogonal layers of more than 10,000 cells are culled tile by tile. Other layers are drawn whole.
 
 ---
 
@@ -268,7 +281,7 @@ final underCursor = grid.queryPoint(cursor);
 final inRange = grid.queryRadius(player, 200);
 ```
 
-`update` moves an item and `remove` takes it out.
+`update` (or inserting an item again) moves an item, and `remove` takes it out. Items far larger than a cell, and queries far larger than the occupied cells, are checked directly rather than cell by cell.
 
 ---
 
@@ -304,15 +317,19 @@ The engine's `TiledInterop` turns a parsed map into the engine's own tile map an
 | Files | TMX, TSX, TX templates (from TMX); TMJ, TSJ | TMX, TSX, TMJ, TSJ |
 | Map orientations | Orthogonal, isometric, staggered, hexagonal | Same |
 | Layer types | Tile (finite and infinite), object, image, group | Same |
-| TMX tile data | CSV, Base64, XML; none, gzip, zlib, Zstandard | CSV, Base64; none, gzip, zlib |
-| TMJ tile data | Arrays, Base64; none, gzip, zlib, Zstandard | Arrays, Base64 with zlib |
+| TMX tile data | CSV, Base64, XML; none, gzip, zlib, [Zstandard in part](#zstandard) | CSV, Base64; none, gzip, zlib |
+| TMJ tile data | Arrays, Base64; none, gzip, zlib, [Zstandard in part](#zstandard) | Arrays, Base64 with zlib |
 | Tilesets | Embedded, external, several per map, image collections | Same |
 | Tile flags | Horizontal, vertical, diagonal, hexagonal 120° | Same |
 | Tiles | Properties, animation, own images, collision shapes | Same |
 | Wang sets | Corner, edge, mixed; pre-1.5 hex Wang ids | Corner, edge, mixed |
 | Objects | Rectangle, ellipse, point, polygon, polyline, tile, text | Same, with template paths |
-| Properties | string, int, float, bool, color, file, object | Same |
+| Properties | string, int, float, bool, color, file, object; custom enums and classes | Same |
 | Layer settings | Opacity, tint, offset, parallax, locked, class | Same |
+
+### Zstandard
+
+Zstandard tile data is unpacked by [`just_zstd`](https://pub.dev/packages/just_zstd), which so far reads only uncompressed Zstandard blocks. Data the zstd library compressed, as Tiled saves it, is refused with a `FormatException` rather than read wrong. Until that changes, save maps with zlib (Tiled's default) or gzip.
 
 ---
 

@@ -6,26 +6,45 @@ import 'dart:typed_data';
 import 'dart:ui';
 
 import 'package:just_deflate/just_deflate.dart';
-import 'package:just_zstd/just_zstd.dart';
 
 import '../models/models.dart';
+import '../parser/tile_data.dart';
 import '../parser/tile_map_parser.dart';
 import '../parser/tsx_provider.dart';
 import '../writer/xml_common.dart' show tiledColor, tmxFormatVersion;
 
 /// Reads TMJ maps and TSJ tilesets into the same models the TMX parser
 /// produces.
+///
+/// A document that isn't valid JSON, or whose values have the wrong types,
+/// throws a [FormatException].
 abstract final class TmjParser {
   /// Parse a TMJ document. External tilesets are read through
   /// [tsxProvider], as TSJ or TSX by their file ending.
-  static Future<TiledMap> parse(String json, {TsxProvider? tsxProvider}) =>
-      parseMap(jsonDecode(json) as Map<String, dynamic>, tsxProvider: tsxProvider);
+  static Future<TiledMap> parse(
+    String json, {
+    TsxProvider? tsxProvider,
+  }) async => parseMap(
+    _jsonObject(jsonDecode(json), 'TMJ map'),
+    tsxProvider: tsxProvider,
+  );
 
   /// Parse an already-decoded TMJ document.
   static Future<TiledMap> parseMap(
     Map<String, dynamic> json, {
     TsxProvider? tsxProvider,
   }) async {
+    try {
+      return await _parseMap(json, tsxProvider);
+    } on TypeError catch (e) {
+      throw FormatException('Not a valid TMJ map: $e');
+    }
+  }
+
+  static Future<TiledMap> _parseMap(
+    Map<String, dynamic> json,
+    TsxProvider? tsxProvider,
+  ) async {
     final tilesets = <Tileset>[];
     for (final raw in _list(json['tilesets'])) {
       final ts = raw as Map<String, dynamic>;
@@ -36,11 +55,7 @@ abstract final class TmjParser {
         final p = source.toLowerCase();
         tilesets.add(
           p.endsWith('.tsj') || p.endsWith('.json')
-              ? parseTilesetJson(
-                  jsonDecode(text) as Map<String, dynamic>,
-                  firstGid: firstGid,
-                  source: source,
-                )
+              ? parseTileset(text, firstGid: firstGid, source: source)
               : TileMapParser.parseTileset(
                   text,
                   firstGid: firstGid,
@@ -82,18 +97,24 @@ abstract final class TmjParser {
       parallaxOriginX: _double(json['parallaxoriginx']),
       parallaxOriginY: _double(json['parallaxoriginy']),
       tilesets: tilesets,
-      layers: [for (final l in _list(json['layers'])) ?_layer(l as Map<String, dynamic>)],
+      layers: [
+        for (final l in _list(json['layers']))
+          ?_layer(l as Map<String, dynamic>),
+      ],
       properties: _properties(json['properties']),
     );
   }
 
   /// Parse a TSJ document.
-  static Tileset parseTileset(String json, {int firstGid = 1, String? source}) =>
-      parseTilesetJson(
-        jsonDecode(json) as Map<String, dynamic>,
-        firstGid: firstGid,
-        source: source,
-      );
+  static Tileset parseTileset(
+    String json, {
+    int firstGid = 1,
+    String? source,
+  }) => parseTilesetJson(
+    _jsonObject(jsonDecode(json), 'TSJ tileset'),
+    firstGid: firstGid,
+    source: source,
+  );
 
   /// Parse an already-decoded tileset: a TSJ document, or one embedded in
   /// a TMJ map.
@@ -102,6 +123,25 @@ abstract final class TmjParser {
     int firstGid = 1,
     String? source,
   }) {
+    try {
+      return _parseTileset(json, firstGid, source);
+    } on TypeError catch (e) {
+      throw FormatException('Not a valid TSJ tileset: $e');
+    }
+  }
+
+  /// [decoded] as a JSON object, or a [FormatException] naming [what] it
+  /// should have been.
+  static Map<String, dynamic> _jsonObject(Object? decoded, String what) {
+    if (decoded is Map<String, dynamic>) return decoded;
+    throw FormatException('Not a valid $what: expected a JSON object');
+  }
+
+  static Tileset _parseTileset(
+    Map<String, dynamic> json,
+    int firstGid,
+    String? source,
+  ) {
     final offset = json['tileoffset'] as Map<String, dynamic>?;
     final grid = json['grid'] as Map<String, dynamic>?;
     final transforms = json['transformations'] as Map<String, dynamic>?;
@@ -270,7 +310,9 @@ abstract final class TmjParser {
           width: _int(json['width']),
           height: _int(json['height']),
           data: [for (final g in raw) TiledGid.idOf(g)],
-          flipHorizontal: [for (final g in raw) TiledGid.isFlippedHorizontally(g)],
+          flipHorizontal: [
+            for (final g in raw) TiledGid.isFlippedHorizontally(g),
+          ],
           flipVertical: [for (final g in raw) TiledGid.isFlippedVertically(g)],
           flipDiagonal: [for (final g in raw) TiledGid.isFlippedDiagonally(g)],
           rawData: chunks.isEmpty ? raw : null,
@@ -360,21 +402,7 @@ abstract final class TmjParser {
       ]);
     }
     if (data is String) {
-      final bytes = base64Decode(data.trim());
-      final limit = cells > 0 ? cells * 4 : null;
-      final Uint8List plain = switch (compression) {
-        LayerCompression.none => bytes,
-        LayerCompression.gzip => const GzipCodec().decode(
-          bytes,
-          maxOutputSize: limit,
-        ),
-        LayerCompression.zlib => const ZlibCodec().decode(
-          bytes,
-          maxOutputSize: limit,
-        ),
-        LayerCompression.zstd => const ZstdDecoder().decodeBytes(bytes),
-      };
-      return TiledGid.fromBytes(plain);
+      return unpackTileIds(base64Decode(data.trim()), compression, cells);
     }
     return Uint32List(0);
   }
@@ -412,21 +440,37 @@ abstract final class TmjParser {
     if (raw is! List || raw.isEmpty) return const TiledProperties();
     final values = <String, dynamic>{};
     final types = <String, String>{};
+    final propertyTypes = <String, String>{};
     for (final p in raw) {
       final m = p as Map;
       final name = m['name'] as String? ?? '';
       final type = m['type'] as String? ?? 'string';
       final value = m['value'];
       types[name] = type;
+      final propertyType = m['propertytype'];
+      if (propertyType is String && propertyType.isNotEmpty) {
+        propertyTypes[name] = propertyType;
+      }
       values[name] = switch (type) {
         'int' || 'object' => (value as num?)?.toInt() ?? 0,
         'float' => (value as num?)?.toDouble() ?? 0.0,
         'bool' => value == true,
         'color' => _color(value),
+        'class' => _members(value),
         _ => value is String ? value : '${value ?? ''}',
       };
     }
-    return TiledProperties(values, types);
+    return TiledProperties(values, types, propertyTypes);
+  }
+
+  /// A `class` property's members. TMJ gives only their values, so each
+  /// member's type is read from its value: a colour comes back a string.
+  static TiledProperties _members(Object? raw) {
+    if (raw is! Map || raw.isEmpty) return const TiledProperties();
+    return TiledProperties({
+      for (final MapEntry(:key, :value) in raw.entries)
+        key as String: value is Map ? _members(value) : value,
+    });
   }
 
   static List<Object?> _list(Object? raw) => raw is List ? raw : const [];
@@ -455,9 +499,9 @@ abstract final class TmjWriter {
     TiledMap map, {
     bool base64Zlib = false,
     String tiledVersion = '1.10.2',
-  }) => const JsonEncoder.withIndent(' ').convert(
-    toJson(map, base64Zlib: base64Zlib, tiledVersion: tiledVersion),
-  );
+  }) => const JsonEncoder.withIndent(
+    ' ',
+  ).convert(toJson(map, base64Zlib: base64Zlib, tiledVersion: tiledVersion));
 
   /// [map] as a TMJ object.
   static Map<String, dynamic> toJson(
@@ -497,13 +541,15 @@ abstract final class TmjWriter {
   };
 
   /// [tileset] as a TSJ document.
-  static String writeTileset(Tileset tileset, {String tiledVersion = '1.10.2'}) =>
-      const JsonEncoder.withIndent(' ').convert({
-        ...tilesetToJson(tileset),
-        'tiledversion': tiledVersion,
-        'type': 'tileset',
-        'version': tmxFormatVersion,
-      });
+  static String writeTileset(
+    Tileset tileset, {
+    String tiledVersion = '1.10.2',
+  }) => const JsonEncoder.withIndent(' ').convert({
+    ...tilesetToJson(tileset),
+    'tiledversion': tiledVersion,
+    'type': 'tileset',
+    'version': tmxFormatVersion,
+  });
 
   /// [tileset] as a tileset object; with [firstGid] when embedded in a map.
   static Map<String, dynamic> tilesetToJson(Tileset ts, {int? firstGid}) {
@@ -535,8 +581,7 @@ abstract final class TmjWriter {
         'tileoffset': {'x': ts.tileOffset.dx, 'y': ts.tileOffset.dy},
       if (ts.tileRenderSize != TileRenderSize.tile)
         'tilerendersize': ts.tileRenderSize.name,
-      if (ids.isNotEmpty)
-        'tiles': [for (final id in ids) _tile(ts.tiles[id]!)],
+      if (ids.isNotEmpty) 'tiles': [for (final id in ids) _tile(ts.tiles[id]!)],
       'tilewidth': ts.tileWidth,
       if (t.any)
         'transformations': {
@@ -684,9 +729,13 @@ abstract final class TmjWriter {
     'name': o.name,
     if (o.isPoint) 'point': true,
     if (o.polygon != null)
-      'polygon': [for (final p in o.polygon!) {'x': p.dx, 'y': p.dy}],
+      'polygon': [
+        for (final p in o.polygon!) {'x': p.dx, 'y': p.dy},
+      ],
     if (o.polyline != null)
-      'polyline': [for (final p in o.polyline!) {'x': p.dx, 'y': p.dy}],
+      'polyline': [
+        for (final p in o.polyline!) {'x': p.dx, 'y': p.dy},
+      ],
     if (o.properties.isNotEmpty) 'properties': _properties(o.properties),
     'rotation': o.rotation,
     'template': ?o.templatePath,
@@ -702,11 +751,19 @@ abstract final class TmjWriter {
     for (final key in p.keys)
       {
         'name': key,
+        'propertytype': ?p.propertyTypeOf(key),
         'type': p.typeOf(key),
-        'value': switch (p[key]) {
-          final Color c => tiledColor(c),
-          final Object? v => v,
-        },
+        'value': _propertyValue(p[key]),
       },
   ];
+
+  /// A property's value as TMJ writes it: a colour as its notation, a
+  /// class's members as an object of their values.
+  static Object? _propertyValue(Object? value) => switch (value) {
+    final Color c => tiledColor(c),
+    final TiledProperties members => {
+      for (final key in members.keys) key: _propertyValue(members[key]),
+    },
+    _ => value,
+  };
 }

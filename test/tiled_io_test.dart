@@ -30,9 +30,10 @@ class _Files implements TsxProvider {
 const _dir = 'test/fixtures';
 final _files = _Files(_dir);
 
-Future<TiledMap> _tmx(String name) =>
-    TileMapParser.parse(File('$_dir/$name').readAsStringSync(),
-        tsxProvider: _files);
+Future<TiledMap> _tmx(String name) => TileMapParser.parse(
+  File('$_dir/$name').readAsStringSync(),
+  tsxProvider: _files,
+);
 
 /// Everything the models hold, in one comparable string — tilesets in
 /// full even when the map refers to them by file.
@@ -140,19 +141,22 @@ void main() {
     });
   });
 
-  test('the hexagonal 120° flag stays out of the id and in the raw data', () async {
-    final map = await _tmx('hexagonal.tmx');
-    final layer = map.tileLayers.single;
+  test(
+    'the hexagonal 120° flag stays out of the id and in the raw data',
+    () async {
+      final map = await _tmx('hexagonal.tmx');
+      final layer = map.tileLayers.single;
 
-    expect(layer.rawData![1], TiledGid.rotateHex120 | 1);
-    expect(layer.data[1], 1, reason: 'the flag is not part of the id');
-    expect(TiledGid.isRotatedHex120(layer.rawData![2]), isTrue);
-    expect(TiledGid.isFlippedHorizontally(layer.rawData![2]), isTrue);
-    expect(layer.data[2], 2);
-    expect(map.hexSideLength, 6);
-    expect(map.staggerAxis, StaggerAxis.y);
-    expect(map.staggerIndex, StaggerIndex.odd);
-  });
+      expect(layer.rawData![1], TiledGid.rotateHex120 | 1);
+      expect(layer.data[1], 1, reason: 'the flag is not part of the id');
+      expect(TiledGid.isRotatedHex120(layer.rawData![2]), isTrue);
+      expect(TiledGid.isFlippedHorizontally(layer.rawData![2]), isTrue);
+      expect(layer.data[2], 2);
+      expect(map.hexSideLength, 6);
+      expect(map.staggerAxis, StaggerAxis.y);
+      expect(map.staggerIndex, StaggerIndex.odd);
+    },
+  );
 
   test('an infinite map is read chunk by chunk', () async {
     final map = await _tmx('infinite.tmx');
@@ -201,10 +205,10 @@ void main() {
     expect(terrain.fillMode, FillMode.preserveAspectFit);
     expect(terrain.properties['biome'], 'forest');
     expect(terrain.tiles[2]!.type, 'Wall');
-    expect([for (final s in terrain.wangSets) s.type], [
-      WangSetType.edge,
-      WangSetType.mixed,
-    ]);
+    expect(
+      [for (final s in terrain.wangSets) s.type],
+      [WangSetType.edge, WangSetType.mixed],
+    );
     expect(terrain.wangSets[1].colors[0].probability, 2);
     expect(terrain.wangSets[1].properties['note'], 'both');
     expect(terrain.wangSets[0].wangTiles[1], [0, 0, 1, 0, 0, 0, 1, 0]);
@@ -218,7 +222,16 @@ void main() {
 
   test("a Wang id in Tiled's old hex form still reads", () {
     expect(TileMapParser.parseWangId('0x10101010'), [0, 1, 0, 1, 0, 1, 0, 1]);
-    expect(TileMapParser.parseWangId('1,2,3,4,5,6,7,8'), [1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(TileMapParser.parseWangId('1,2,3,4,5,6,7,8'), [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+    ]);
   });
 
   group('written as TMX and read again, nothing is lost', () {
@@ -259,8 +272,14 @@ void main() {
   test('a map that refers to a tileset by file refers to it again', () async {
     final map = await _tmx('external.tmx');
     final xml = TmxWriter.write(map);
-    expect(xml, contains('<tileset firstgid="1" source="tilesets/terrain.tsx"/>'));
-    expect(xml, contains('<tileset firstgid="17" source="tilesets/props.tsj"/>'));
+    expect(
+      xml,
+      contains('<tileset firstgid="1" source="tilesets/terrain.tsx"/>'),
+    );
+    expect(
+      xml,
+      contains('<tileset firstgid="17" source="tilesets/props.tsj"/>'),
+    );
   });
 
   test('a TSX tileset written and read again is the same tileset', () async {

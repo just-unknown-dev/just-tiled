@@ -1,18 +1,24 @@
 name: just_tiled
-description: "Tiled Map Editor (TMX/TSX) parser and renderer for 2D game engines."
+description: "Read and write Tiled Map Editor files (TMX, TSX, TMJ, TSJ) and draw their tile layers in Flutter: every orientation, infinite maps, every encoding."
 version: 0.4.1
 homepage: https://github.com/just-unknown-dev/just-tiled
 repository: https://github.com/just-unknown-dev/just-tiled
 issue_tracker: https://github.com/just-unknown-dev/just-tiled/issues
+topics:
+  - tiled
+  - tilemap
+  - tmx
+  - gamedev
+  - game
 
 environment:
   sdk: ^3.11.0
-  flutter: ">=1.17.0"
+  flutter: ">=3.41.0"
 
 dependencies:
   flutter:
     sdk: flutter
-  xml: ^6.5.0
+  xml: ">=6.5.0 <8.0.0"
   just_deflate: ^0.1.0
   just_zstd: ^0.2.0
 

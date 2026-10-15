@@ -30,13 +30,15 @@ String tiledNum(num value) {
 }
 
 /// Pretty-prints [builder]'s document, leaving the text of tile data,
-/// chunks and text objects exactly as written.
+/// chunks, text objects and multi-line properties exactly as written.
 String prettyXml(XmlBuilder builder) => builder.buildDocument().toXmlString(
   pretty: true,
   indent: ' ',
   preserveWhitespace: (node) =>
       node is XmlElement &&
-      const {'data', 'chunk', 'text', 'property'}.contains(node.name.local),
+      (const {'data', 'chunk', 'text'}.contains(node.name.local) ||
+          (node.name.local == 'property' &&
+              node.getElement('properties') == null)),
 );
 
 void _attr(XmlBuilder b, String name, Object? value) {
@@ -44,7 +46,8 @@ void _attr(XmlBuilder b, String name, Object? value) {
   b.attribute(name, value is num ? tiledNum(value) : '$value');
 }
 
-/// `<properties>`, when there are any.
+/// `<properties>`, when there are any. A `class` property's members are
+/// written as its own nested `<properties>`.
 void writeProperties(XmlBuilder b, TiledProperties properties) {
   if (properties.isEmpty) return;
   b.element(
@@ -52,7 +55,22 @@ void writeProperties(XmlBuilder b, TiledProperties properties) {
     nest: () {
       for (final key in properties.keys) {
         final type = properties.typeOf(key);
+        final propertyType = properties.propertyTypeOf(key);
         final value = properties[key];
+        if (value is TiledProperties) {
+          b.element(
+            'property',
+            nest: () {
+              b.attribute('name', key);
+              b.attribute('type', 'class');
+              if (propertyType != null) {
+                b.attribute('propertytype', propertyType);
+              }
+              writeProperties(b, value);
+            },
+          );
+          continue;
+        }
         final text = switch (value) {
           final Color c => tiledColor(c),
           final bool v => v ? 'true' : 'false',
@@ -65,6 +83,9 @@ void writeProperties(XmlBuilder b, TiledProperties properties) {
           nest: () {
             b.attribute('name', key);
             if (type != 'string') b.attribute('type', type);
+            if (propertyType != null) {
+              b.attribute('propertytype', propertyType);
+            }
             // A multi-line string is written as text, as Tiled does.
             if (text.contains('\n')) {
               b.text(text);
@@ -291,10 +312,7 @@ void _writeWangSet(XmlBuilder b, WangSet set) {
       for (final id in ids) {
         b.element(
           'wangtile',
-          attributes: {
-            'tileid': '$id',
-            'wangid': set.wangTiles[id]!.join(','),
-          },
+          attributes: {'tileid': '$id', 'wangid': set.wangTiles[id]!.join(',')},
         );
       }
     },

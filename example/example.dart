@@ -63,10 +63,12 @@ class _TiledExamplePageState extends State<TiledExamplePage> {
     try {
       // 1. Parse the map ----------------------------------------------------
       //    The provider loads external tilesets (.tsx / .tsj) and object
-      //    templates. DefaultTsxProvider does this from the asset bundle
-      //    when they sit beside the map; _AssetProvider also follows `../`.
+      //    templates from the asset bundle, reading their paths from the
+      //    map's folder, `../` included.
       final text = await rootBundle.loadString(mapPath);
-      const provider = _AssetProvider(mapPath);
+      final provider = DefaultTsxProvider(
+        basePath: mapPath.substring(0, mapPath.lastIndexOf('/')),
+      );
       final map = mapPath.endsWith('.tmj')
           ? await TmjParser.parse(text, tsxProvider: provider)
           : await TileMapParser.parse(text, tsxProvider: provider);
@@ -90,12 +92,11 @@ class _TiledExamplePageState extends State<TiledExamplePage> {
       // 3. Create the renderers ---------------------------------------------
       //    A renderer draws one layer's tiles from one atlas, so a layer that
       //    uses several tilesets gets one per atlas. compile() turns the
-      //    layer into the buffers of a single Canvas.drawRawAtlas call.
-      //    Hidden layers and an infinite map's chunked layers are skipped:
-      //    the renderer draws neither.
+      //    layer — finite, or an infinite map's chunks — into the buffers of
+      //    a single Canvas.drawRawAtlas call. Hidden layers are skipped.
       final renderers = [
         for (final layer in map.tileLayers)
-          if (layer.visible && !layer.isChunked)
+          if (layer.visible)
             for (final atlas in atlases)
               TileMapRenderer(map: map, tileLayer: layer, atlas: atlas)
                 ..compile(),
@@ -219,22 +220,6 @@ class _TiledExamplePageState extends State<TiledExamplePage> {
 // ---------------------------------------------------------------------------
 // Loading
 // ---------------------------------------------------------------------------
-
-/// Loads external tilesets and templates from the asset bundle, relative to
-/// the map that names them.
-class _AssetProvider implements TsxProvider {
-  const _AssetProvider(this.mapPath);
-
-  final String mapPath;
-
-  @override
-  Future<String> getTsx(String source) =>
-      rootBundle.loadString(_resolve(mapPath, source));
-
-  @override
-  Future<String> getTemplate(String source) =>
-      rootBundle.loadString(_resolve(mapPath, source));
-}
 
 /// [relative] as written in [file], as an asset path: resolved against the
 /// folder [file] is in, with `.` and `..` collapsed.

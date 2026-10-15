@@ -35,9 +35,16 @@ abstract final class TiledGid {
   /// The flag bits of [raw].
   static int flagsOf(int raw) => raw & flagMask;
 
+  /// Whether [raw] has [flipHorizontal] set.
   static bool isFlippedHorizontally(int raw) => (raw & flipHorizontal) != 0;
+
+  /// Whether [raw] has [flipVertical] set.
   static bool isFlippedVertically(int raw) => (raw & flipVertical) != 0;
+
+  /// Whether [raw] has [flipDiagonal] set.
   static bool isFlippedDiagonally(int raw) => (raw & flipDiagonal) != 0;
+
+  /// Whether [raw] has [rotateHex120] set.
   static bool isRotatedHex120(int raw) => (raw & rotateHex120) != 0;
 
   /// [id] with [flags] set, as an unsigned 32-bit value.

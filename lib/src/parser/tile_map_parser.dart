@@ -8,12 +8,12 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'dart:ui';
 
-import 'package:just_deflate/just_deflate.dart';
-import 'package:just_zstd/just_zstd.dart';
 import 'package:xml/xml.dart';
 
 import '../json/tmj_codec.dart';
 import '../models/models.dart';
+import 'paths.dart';
+import 'tile_data.dart';
 import 'tsx_provider.dart';
 
 /// Parser for Tiled Map Editor TMX files.
@@ -49,7 +49,11 @@ class TileMapParser {
 
   /// Parse a standalone TSX tileset document. [firstGid] is what the map
   /// that uses it assigns; 1 when read on its own.
-  static Tileset parseTileset(String tsxXml, {int firstGid = 1, String? source}) {
+  static Tileset parseTileset(
+    String tsxXml, {
+    int firstGid = 1,
+    String? source,
+  }) {
     final root = XmlDocument.parse(tsxXml).rootElement;
     if (root.name.local != 'tileset') {
       throw FormatException(
@@ -71,7 +75,7 @@ class TileMapParser {
 
     final layers = <Layer>[];
     for (final child in element.childElements) {
-      final layer = await _parseLayerElement(child, tsxProvider);
+      final layer = await _parseLayerElement(child, tsxProvider, tilesets);
       if (layer != null) layers.add(layer);
     }
 
@@ -120,11 +124,7 @@ class TileMapParser {
     if (source != null && tsxProvider != null) {
       final text = await tsxProvider.getTsx(source);
       if (_isJsonPath(source)) {
-        return TmjParser.parseTilesetJson(
-          jsonDecode(text) as Map<String, dynamic>,
-          firstGid: firstGid,
-          source: source,
-        );
+        return TmjParser.parseTileset(text, firstGid: firstGid, source: source);
       }
       return _parseTilesetData(
         XmlDocument.parse(text).rootElement,
@@ -227,9 +227,11 @@ class TileMapParser {
         WangColor(
           name: c.getAttribute('name') ?? '',
           className: c.getAttribute('class') ?? '',
-          color: _parseColor(c.getAttribute('color')) ?? const Color(0xFFFF0000),
+          color:
+              _parseColor(c.getAttribute('color')) ?? const Color(0xFFFF0000),
           tile: int.tryParse(c.getAttribute('tile') ?? '') ?? -1,
-          probability: double.tryParse(c.getAttribute('probability') ?? '') ?? 1,
+          probability:
+              double.tryParse(c.getAttribute('probability') ?? '') ?? 1,
           properties: _parseProperties(c),
         ),
     ];
@@ -309,16 +311,17 @@ class TileMapParser {
   static Future<Layer?> _parseLayerElement(
     XmlElement element,
     TsxProvider? tsxProvider,
+    List<Tileset> tilesets,
   ) async {
     switch (element.name.local) {
       case 'layer':
         return _parseTileLayer(element);
       case 'objectgroup':
-        return _parseObjectGroup(element, tsxProvider);
+        return _parseObjectGroup(element, tsxProvider, tilesets);
       case 'imagelayer':
         return _parseImageLayer(element);
       case 'group':
-        return _parseGroupLayer(element, tsxProvider);
+        return _parseGroupLayer(element, tsxProvider, tilesets);
       default:
         return null;
     }
@@ -431,30 +434,14 @@ class TileMapParser {
 
   /// Decode base64-encoded tile data with optional compression.
   ///
-  /// [cells] is how many tiles the data holds, so zlib or gzip data can't
+  /// [cells] is how many tiles the data holds, so compressed data can't
   /// unpack to more than their bytes: damaged or hostile data fails rather
   /// than filling memory. 0 (no size given) sets no limit.
   static Uint32List _decodeBase64(
     String base64Text,
     LayerCompression compression,
     int cells,
-  ) {
-    final bytes = base64Decode(base64Text);
-    final limit = cells > 0 ? cells * 4 : null;
-    final Uint8List plain = switch (compression) {
-      LayerCompression.none => bytes,
-      LayerCompression.gzip => const GzipCodec().decode(
-        bytes,
-        maxOutputSize: limit,
-      ),
-      LayerCompression.zlib => const ZlibCodec().decode(
-        bytes,
-        maxOutputSize: limit,
-      ),
-      LayerCompression.zstd => const ZstdDecoder().decodeBytes(bytes),
-    };
-    return TiledGid.fromBytes(plain);
-  }
+  ) => unpackTileIds(base64Decode(base64Text), compression, cells);
 
   /// Decode XML `tile` elements (unencoded format).
   static Uint32List _decodeXmlTiles(XmlElement element) => Uint32List.fromList([
@@ -466,10 +453,13 @@ class TileMapParser {
   static Future<ObjectGroup> _parseObjectGroup(
     XmlElement element,
     TsxProvider? tsxProvider,
+    List<Tileset> tilesets,
   ) async {
     final objects = <TiledObject>[];
     for (final objElement in element.findElements('object')) {
-      objects.add(await _parseObjectWithTemplate(objElement, tsxProvider));
+      objects.add(
+        await _parseObjectWithTemplate(objElement, tsxProvider, tilesets),
+      );
     }
 
     return ObjectGroup(
@@ -497,6 +487,7 @@ class TileMapParser {
   static Future<TiledObject> _parseObjectWithTemplate(
     XmlElement element,
     TsxProvider? tsxProvider,
+    List<Tileset> tilesets,
   ) async {
     final templatePath = element.getAttribute('template');
     if (templatePath != null && tsxProvider != null) {
@@ -511,6 +502,7 @@ class TileMapParser {
             templateObjectElement,
             element,
             templatePath,
+            _templateGid(templateRoot, templatePath, tilesets),
           );
         }
       } catch (e, st) {
@@ -525,11 +517,44 @@ class TileMapParser {
     return _parseObject(element);
   }
 
-  /// Merge a template object with an instance override.
+  /// The template's tile object gid, flags kept, renumbered for the map.
+  ///
+  /// A template numbers its tile from its own `tileset` element, an external
+  /// tileset given relative to the template file. The map holds that same
+  /// tileset under its own first gid, so the id moves by the difference.
+  /// Null when the template has no gid; the template's own gid when the map
+  /// doesn't hold its tileset.
+  static int? _templateGid(
+    XmlElement templateRoot,
+    String templatePath,
+    List<Tileset> tilesets,
+  ) {
+    final raw = _gid(templateRoot.getElement('object')?.getAttribute('gid'));
+    if (raw == null) return null;
+    final tilesetElement = templateRoot.getElement('tileset');
+    final source = tilesetElement?.getAttribute('source');
+    if (tilesetElement == null || source == null) return raw;
+    final templateFirstGid =
+        int.tryParse(tilesetElement.getAttribute('firstgid') ?? '') ?? 1;
+    final path = resolveFrom(templatePath, source);
+    for (final ts in tilesets) {
+      final mapSource = ts.source;
+      if (mapSource == null || normalizePath(mapSource) != path) continue;
+      return TiledGid.compose(
+        TiledGid.idOf(raw) - templateFirstGid + ts.firstGid,
+        TiledGid.flagsOf(raw),
+      );
+    }
+    return raw;
+  }
+
+  /// Merge a template object with an instance override. [templateGid] is
+  /// the template's gid, already renumbered for the map.
   static TiledObject _mergeTemplateObject(
     XmlElement template,
     XmlElement instance,
     String templatePath,
+    int? templateGid,
   ) {
     // Instance attributes override template attributes
     String attr(String name, [String defaultValue = '']) {
@@ -552,7 +577,7 @@ class TileMapParser {
       width: double.parse(attr('width', '0')),
       height: double.parse(attr('height', '0')),
       rotation: double.parse(attr('rotation', '0')),
-      gid: _gid(attr('gid')),
+      gid: _gid(instance.getAttribute('gid')) ?? templateGid,
       visible: attr('visible', '1') != '0',
       templatePath: templatePath,
       polygon: _parsePolygon(instance) ?? _parsePolygon(template),
@@ -629,10 +654,11 @@ class TileMapParser {
   static Future<GroupLayer> _parseGroupLayer(
     XmlElement element,
     TsxProvider? tsxProvider,
+    List<Tileset> tilesets,
   ) async {
     final layers = <Layer>[];
     for (final child in element.childElements) {
-      final layer = await _parseLayerElement(child, tsxProvider);
+      final layer = await _parseLayerElement(child, tsxProvider, tilesets);
       if (layer != null) layers.add(layer);
     }
 
@@ -670,7 +696,9 @@ class TileMapParser {
   /// Parse a Tiled points string (e.g., "0,0 32,0 32,32").
   static List<Offset> _parsePointsString(String pointsStr) {
     if (pointsStr.isEmpty) return [];
-    return pointsStr.split(' ').where((p) => p.isNotEmpty).map((pair) {
+    return pointsStr.split(RegExp(r'\s+')).where((p) => p.isNotEmpty).map((
+      pair,
+    ) {
       final parts = pair.split(',');
       return Offset(
         double.tryParse(parts[0]) ?? 0.0,
@@ -679,18 +707,29 @@ class TileMapParser {
     }).toList();
   }
 
-  /// Parse `properties` element, keeping each property's declared type.
+  /// Parse `properties` element, keeping each property's declared type and
+  /// custom type. A `class` property's members are its own nested
+  /// `properties` element.
   static TiledProperties _parseProperties(XmlElement element) {
     final propsElement = element.getElement('properties');
     if (propsElement == null) return const TiledProperties();
 
     final map = <String, dynamic>{};
     final types = <String, String>{};
+    final propertyTypes = <String, String>{};
     for (final prop in propsElement.findElements('property')) {
       final name = prop.getAttribute('name') ?? '';
       final type = prop.getAttribute('type') ?? 'string';
-      final value = prop.getAttribute('value') ?? prop.innerText;
       types[name] = type;
+      final propertyType = prop.getAttribute('propertytype');
+      if (propertyType != null && propertyType.isNotEmpty) {
+        propertyTypes[name] = propertyType;
+      }
+      if (type == 'class') {
+        map[name] = _parseProperties(prop);
+        continue;
+      }
+      final value = prop.getAttribute('value') ?? prop.innerText;
 
       switch (type) {
         case 'int':
@@ -709,7 +748,7 @@ class TileMapParser {
       }
     }
 
-    return TiledProperties(map, types);
+    return TiledProperties(map, types, propertyTypes);
   }
 
   /// Merge two property sets (instance overrides template).
@@ -717,15 +756,22 @@ class TileMapParser {
     TiledProperties template,
     TiledProperties instance,
   ) {
-    final merged = <String, dynamic>{...template.toMap()};
-    final types = <String, String>{
-      for (final key in template.keys) key: template.typeOf(key),
-    };
-    for (final key in instance.keys) {
-      merged[key] = instance[key];
-      types[key] = instance.typeOf(key);
+    final merged = <String, dynamic>{};
+    final types = <String, String>{};
+    final propertyTypes = <String, String>{};
+    for (final from in [template, instance]) {
+      for (final key in from.keys) {
+        merged[key] = from[key];
+        types[key] = from.typeOf(key);
+        final propertyType = from.propertyTypeOf(key);
+        if (propertyType != null) {
+          propertyTypes[key] = propertyType;
+        } else {
+          propertyTypes.remove(key);
+        }
+      }
     }
-    return TiledProperties(merged, types);
+    return TiledProperties(merged, types, propertyTypes);
   }
 
   static int _int(XmlElement element, String name, [int fallback = 0]) =>

@@ -4,17 +4,29 @@ library;
 import 'dart:ui';
 
 /// Typed custom properties from Tiled's properties tags.
+///
+/// A value is a `String` (`string` and `file` properties), an `int` (`int`
+/// and `object`), a `double` (`float`), a `bool`, a [Color] (or null for a
+/// `color` left empty), or, for a `class` property, the class's members as
+/// another [TiledProperties].
 class TiledProperties {
   final Map<String, dynamic> _values;
   final Map<String, String> _types;
+  final Map<String, String> _propertyTypes;
 
   /// [types] records each property's declared Tiled type (`string`, `int`,
-  /// `float`, `bool`, `color`, `file`, `object`) where the value alone
-  /// cannot say — a `file` is a string, an `object` an int — so a writer
-  /// can give it back as it was.
-  const TiledProperties([Map<String, dynamic>? values, Map<String, String>? types])
-    : _values = values ?? const {},
-      _types = types ?? const {};
+  /// `float`, `bool`, `color`, `file`, `object`, `class`) where the value
+  /// alone cannot say — a `file` is a string, an `object` an int — so a
+  /// writer can give it back as it was. [propertyTypes] records the custom
+  /// type (Tiled 1.8+) of a property that has one: an enum's or a class's
+  /// name.
+  const TiledProperties([
+    Map<String, dynamic>? values,
+    Map<String, String>? types,
+    Map<String, String>? propertyTypes,
+  ]) : _values = values ?? const {},
+       _types = types ?? const {},
+       _propertyTypes = propertyTypes ?? const {};
 
   /// All property keys.
   Iterable<String> get keys => _values.keys;
@@ -28,7 +40,18 @@ class TiledProperties {
     if (v is int) return 'int';
     if (v is double) return 'float';
     if (v is Color) return 'color';
+    if (v is TiledProperties) return 'class';
     return 'string';
+  }
+
+  /// The custom type of [key] — the name of the enum or class it was
+  /// declared with in Tiled's custom types (Tiled 1.8+) — or null.
+  String? propertyTypeOf(String key) => _propertyTypes[key];
+
+  /// A `class` property's members, or null if [key] is not one.
+  TiledProperties? getClass(String key) {
+    final v = _values[key];
+    return v is TiledProperties ? v : null;
   }
 
   /// Whether a property exists.
@@ -76,6 +99,9 @@ class TiledProperties {
 
   /// Whether properties are not empty.
   bool get isNotEmpty => _values.isNotEmpty;
+
+  @override
+  String toString() => 'TiledProperties($_values)';
 }
 
 /// A Tiled map object (from <object> elements).
@@ -131,6 +157,7 @@ class TiledObject {
   /// Custom properties.
   final TiledProperties properties;
 
+  /// An object; [id] is unique within the map.
   const TiledObject({
     required this.id,
     this.name = '',

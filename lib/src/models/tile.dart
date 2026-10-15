@@ -46,6 +46,7 @@ class Tile {
   /// Custom properties.
   final TiledProperties properties;
 
+  /// A tileset's data for its tile [id].
   const Tile({
     required this.id,
     this.type,

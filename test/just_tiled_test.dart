@@ -445,27 +445,7 @@ void main() {
     });
   });
 
-  // -------------------------------------------------------------------------
-  // DefaultTsxProvider path resolution
-  // -------------------------------------------------------------------------
-  group('DefaultTsxProvider._resolvePath', () {
-    test('absolute asset path is returned as-is', () {
-      const p = DefaultTsxProvider(basePath: 'assets/maps');
-      // Access via getTsx is async + hits rootBundle, so test the path logic
-      // by verifying it doesn't double-prefix an absolute path.
-      // We verify this indirectly: a source starting with 'assets/' is returned unchanged.
-      // (We call a public method that exercises the same code path via a subclass.)
-      // Direct unit test of _resolvePath is not possible (private), but the
-      // constructor + basePath logic is covered by the integration tests above.
-      expect(p.basePath, equals('assets/maps'));
-    });
-
-    test('relative source is joined with basePath', () {
-      // Construct with a basePath and verify the field is stored.
-      const p = DefaultTsxProvider(basePath: 'assets');
-      expect(p.basePath, equals('assets'));
-    });
-  });
+  // DefaultTsxProvider's paths are tested in paths_and_templates_test.dart.
 
   // -------------------------------------------------------------------------
   // TiledMap helpers

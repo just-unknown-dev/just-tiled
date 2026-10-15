@@ -244,9 +244,9 @@ abstract final class TmxWriter {
       final rows = <String>[];
       for (var i = 0; i < gids.length; i += rowWidth) {
         final end = i + rowWidth > gids.length ? gids.length : i + rowWidth;
-        rows.add([
-          for (var j = i; j < end; j++) gids[j].toUnsigned(32),
-        ].join(','));
+        rows.add(
+          [for (var j = i; j < end; j++) gids[j].toUnsigned(32)].join(','),
+        );
       }
       return '\n${rows.join(',\n')}\n';
     }

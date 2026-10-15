@@ -18,6 +18,9 @@ class TextureAtlas {
   /// Cached source rectangles keyed by global tile ID.
   final Map<int, ui.Rect> _sourceRects = {};
 
+  /// [image] and its mirror image, made on first use.
+  ui.Image? _mirrored;
+
   /// Create a texture atlas for the given [tileset] and its loaded [image].
   TextureAtlas({required this.image, required this.tileset}) {
     _precomputeRects();
@@ -35,8 +38,7 @@ class TextureAtlas {
   ///
   /// Returns null if the GID doesn't belong to this tileset.
   ui.Rect? getSourceRect(int gid) {
-    if (gid < tileset.firstGid ||
-        gid >= tileset.firstGid + tileset.tileCount) {
+    if (gid < tileset.firstGid || gid >= tileset.firstGid + tileset.tileCount) {
       return null;
     }
     return _sourceRects[gid];
@@ -52,9 +54,71 @@ class TextureAtlas {
   /// The image height.
   int get imageHeight => image.height;
 
-  /// Dispose the image resource.
+  /// Whether [mirroredImage] puts the mirror below [image] rather than
+  /// beside it: below for an image wider than it is tall, so the result
+  /// grows along its shorter side.
+  bool get _mirrorBelow => image.width > image.height;
+
+  /// [image] with a copy of it, mirrored left to right, beside it (or below
+  /// it, for an image wider than it is tall). Made on first use and owned
+  /// by this atlas.
+  ///
+  /// `Canvas.drawRawAtlas` can rotate a tile but not mirror it, so
+  /// `TileMapRenderer` draws a layer with mirrored tiles from this image:
+  /// every Tiled flip is a turn of the tile or of its mirror.
+  ui.Image get mirroredImage {
+    final existing = _mirrored;
+    if (existing != null) return existing;
+    final w = image.width.toDouble();
+    final h = image.height.toDouble();
+    final recorder = ui.PictureRecorder();
+    final canvas = ui.Canvas(recorder);
+    final paint = ui.Paint()..filterQuality = ui.FilterQuality.none;
+    canvas.drawImage(image, ui.Offset.zero, paint);
+    if (_mirrorBelow) {
+      canvas.translate(w, h);
+    } else {
+      canvas.translate(2 * w, 0);
+    }
+    canvas.scale(-1, 1);
+    canvas.drawImage(image, ui.Offset.zero, paint);
+    final picture = recorder.endRecording();
+    final mirrored = picture.toImageSync(
+      _mirrorBelow ? image.width : image.width * 2,
+      _mirrorBelow ? image.height * 2 : image.height,
+    );
+    picture.dispose();
+    return _mirrored = mirrored;
+  }
+
+  /// The source rectangle of [gid]'s mirror image within [mirroredImage],
+  /// or null if the GID doesn't belong to this tileset.
+  ui.Rect? getMirroredSourceRect(int gid) {
+    final rect = getSourceRect(gid);
+    if (rect == null) return null;
+    final w = image.width.toDouble();
+    if (_mirrorBelow) {
+      final h = image.height.toDouble();
+      return ui.Rect.fromLTRB(
+        w - rect.right,
+        rect.top + h,
+        w - rect.left,
+        rect.bottom + h,
+      );
+    }
+    return ui.Rect.fromLTRB(
+      2 * w - rect.right,
+      rect.top,
+      2 * w - rect.left,
+      rect.bottom,
+    );
+  }
+
+  /// Dispose the image resources: [image], and [mirroredImage] if made.
   void dispose() {
     image.dispose();
+    _mirrored?.dispose();
+    _mirrored = null;
   }
 }
 
@@ -67,8 +131,8 @@ class TextureAtlasCollection {
 
   /// Create a collection from a list of atlases.
   TextureAtlasCollection(List<TextureAtlas> atlases)
-      : _atlases = List.from(atlases)
-          ..sort((a, b) => b.tileset.firstGid.compareTo(a.tileset.firstGid));
+    : _atlases = List.from(atlases)
+        ..sort((a, b) => b.tileset.firstGid.compareTo(a.tileset.firstGid));
 
   /// Public read-only access to the atlas list.
   List<TextureAtlas> get atlases => List.unmodifiable(_atlases);

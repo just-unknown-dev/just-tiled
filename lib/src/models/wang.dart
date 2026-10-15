@@ -16,12 +16,17 @@ enum WangSetType {
   /// Corners and edges together.
   mixed;
 
-  static WangSetType fromString(String? value) => WangSetType.values
-      .firstWhere((e) => e.name == value, orElse: () => WangSetType.corner);
+  /// The type named [value] in a tileset file; [corner] for any other
+  /// value, or none.
+  static WangSetType fromString(String? value) => WangSetType.values.firstWhere(
+    (e) => e.name == value,
+    orElse: () => WangSetType.corner,
+  );
 }
 
 /// One terrain of a Wang set: grass, water, a road.
 class WangColor {
+  /// A terrain, red in the editor unless [color] says otherwise.
   const WangColor({
     this.name = '',
     this.className = '',
@@ -31,7 +36,10 @@ class WangColor {
     TiledProperties? properties,
   }) : properties = properties ?? const TiledProperties();
 
+  /// The terrain's name.
   final String name;
+
+  /// The terrain's class (Tiled 1.9+).
   final String className;
 
   /// How the editor shows it.
@@ -43,6 +51,7 @@ class WangColor {
   /// How often a brush picks tiles of this colour, relative to the others.
   final double probability;
 
+  /// Custom properties.
   final TiledProperties properties;
 }
 
@@ -53,6 +62,7 @@ class WangColor {
 /// the even ones, corner slots the odd ones. Each slot holds a colour index
 /// (1-based), or 0 for "none".
 class WangSet {
+  /// A set of [colors], matched by [type].
   const WangSet({
     this.name = '',
     this.className = '',
@@ -63,8 +73,13 @@ class WangSet {
     TiledProperties? properties,
   }) : properties = properties ?? const TiledProperties();
 
+  /// The set's name.
   final String name;
+
+  /// The set's class (Tiled 1.9+).
   final String className;
+
+  /// What the set matches tiles by.
   final WangSetType type;
 
   /// A tile that stands for the set, or -1.
@@ -76,5 +91,6 @@ class WangSet {
   /// The Wang id of each tile that has one, by local tile id: eight slots.
   final Map<int, List<int>> wangTiles;
 
+  /// Custom properties.
   final TiledProperties properties;
 }
