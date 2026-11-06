@@ -2,7 +2,7 @@
 ///
 /// Reads a Tiled map (TMX or TMJ), loads its tileset images, draws its tile
 /// layers on a Flutter canvas you can drag around, and shows the map's
-/// objects, properties, raw tile ids and the writers.
+/// objects, templates, properties, raw tile ids and the writers.
 ///
 /// Prerequisites:
 /// - Put a `.tmx` or `.tmj` map, and the tilesets and images it uses, under
@@ -24,7 +24,7 @@ import 'package:flutter/services.dart' show rootBundle;
 import 'package:just_tiled/just_tiled.dart';
 
 /// The map to show. A `.tmj` file is read with [TmjParser], anything else
-/// with [TileMapParser].
+/// with [TmxParser].
 const mapPath = 'assets/maps/desert.tmx';
 
 // ---------------------------------------------------------------------------
@@ -63,15 +63,15 @@ class _TiledExamplePageState extends State<TiledExamplePage> {
     try {
       // 1. Parse the map ----------------------------------------------------
       //    The provider loads external tilesets (.tsx / .tsj) and object
-      //    templates from the asset bundle, reading their paths from the
-      //    map's folder, `../` included.
+      //    templates (.tx / .tj) from the asset bundle, reading their paths
+      //    from the map's folder, `../` included.
       final text = await rootBundle.loadString(mapPath);
-      final provider = DefaultTsxProvider(
+      final provider = AssetTiledFileProvider(
         basePath: mapPath.substring(0, mapPath.lastIndexOf('/')),
       );
       final map = mapPath.endsWith('.tmj')
-          ? await TmjParser.parse(text, tsxProvider: provider)
-          : await TileMapParser.parse(text, tsxProvider: provider);
+          ? await TmjParser.parse(text, fileProvider: provider)
+          : await TmxParser.parse(text, fileProvider: provider);
 
       // 2. Load tileset images and build texture atlases ---------------------
       //    An image path is relative to the file that declares the tileset:
@@ -117,7 +117,8 @@ class _TiledExamplePageState extends State<TiledExamplePage> {
       }
 
       // 5. Log the objects ---------------------------------------------------
-      //    A tile object's gid is raw: TiledGid takes the flags off.
+      //    A tile object's gid is raw: TiledGid takes the flags off. An
+      //    object placed from a template holds the template's values too.
       for (final group in map.objectGroups) {
         for (final obj in group.objects) {
           final gid = obj.gid;
@@ -125,7 +126,8 @@ class _TiledExamplePageState extends State<TiledExamplePage> {
             'Object "${obj.name}" (${obj.type}) '
             'at (${obj.x.toStringAsFixed(0)}, ${obj.y.toStringAsFixed(0)})'
             '${gid == null ? '' : ', tile ${TiledGid.idOf(gid)}'}'
-            '${gid != null && TiledGid.isFlippedHorizontally(gid) ? ', mirrored' : ''}',
+            '${gid != null && TiledGid.isFlippedHorizontally(gid) ? ', mirrored' : ''}'
+            '${obj.templatePath == null ? '' : ', from ${obj.templatePath}'}',
           );
         }
       }
@@ -136,17 +138,16 @@ class _TiledExamplePageState extends State<TiledExamplePage> {
         debugPrint('Custom gravity: $gravity');
       }
 
-      // 7. Index the objects in a spatial hash grid --------------------------
-      final grid = SpatialHashGrid<TiledObject>(cellSize: 128);
-      for (final obj in map.objectGroups.expand((g) => g.objects)) {
-        grid.insert(obj, Rect.fromLTWH(obj.x, obj.y, obj.width, obj.height));
+      // 7. Read raw tile ids -------------------------------------------------
+      //    A finite layer keeps its tiles in gids: raw ids, flags included.
+      for (final layer in map.tileLayers.where((l) => !l.isChunked)) {
+        final used = layer.gids.where((raw) => TiledGid.idOf(raw) != 0);
+        debugPrint('Layer "${layer.name}": ${used.length} tiles placed');
       }
-      final nearby = grid.query(const Rect.fromLTWH(0, 0, 512, 512));
-      debugPrint('Objects within 512 px of the origin: ${nearby.length}');
 
       // 8. Write the map back out --------------------------------------------
       //    The writers return text; save it wherever you like.
-      final tmx = TmxWriter.write(map, encoding: TmxDataEncoding.base64Zlib);
+      final tmx = TmxWriter.write(map, encoding: TiledDataEncoding.base64Zlib);
       final tmj = TmjWriter.write(map);
       debugPrint('As TMX: ${tmx.length} characters; as TMJ: ${tmj.length}');
 
@@ -260,8 +261,8 @@ class _MapScene {
                 .map((r) => r.worldBounds)
                 .reduce((a, b) => a.expandToInclude(b));
 
-  /// Renderers share atlases, so each atlas is disposed here, once —
-  /// not through TileMapRenderer.dispose().
+  /// Renderers share atlases and own none, so each atlas is disposed here,
+  /// once; that disposes its image.
   void dispose() {
     for (final atlas in atlases) {
       atlas.dispose();
@@ -292,7 +293,7 @@ class _TileMapPainter extends CustomPainter {
     final visible = camera & size;
 
     for (final renderer in scene.renderers) {
-      renderer.render(canvas, camera, visible);
+      renderer.render(canvas, visible);
     }
 
     canvas.restore();

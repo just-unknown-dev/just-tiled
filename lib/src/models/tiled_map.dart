@@ -3,10 +3,10 @@ library;
 
 import 'dart:ui';
 
-import 'enums.dart';
-import 'layer.dart';
+import 'map_layers.dart';
+import 'tiled_enums.dart';
+import 'tiled_properties.dart';
 import 'tileset.dart';
-import 'tiled_object.dart';
 
 /// The root document representing a parsed TMX map.
 class TiledMap {

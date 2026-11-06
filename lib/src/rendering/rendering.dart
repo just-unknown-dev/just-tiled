@@ -1,4 +1,4 @@
-/// Rendering barrel export.
+/// Drawing tile layers: texture atlases and the `drawRawAtlas` renderer.
 library;
 
 export 'texture_atlas.dart';

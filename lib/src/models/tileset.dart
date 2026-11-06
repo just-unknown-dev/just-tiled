@@ -3,10 +3,10 @@ library;
 
 import 'dart:ui';
 
-import 'enums.dart';
 import 'tile.dart';
-import 'tiled_object.dart';
-import 'wang.dart';
+import 'tiled_enums.dart';
+import 'tiled_properties.dart';
+import 'wang_set.dart';
 
 /// How tile objects of an isometric tileset are laid out in Tiled's
 /// tileset view — the `<grid>` element.

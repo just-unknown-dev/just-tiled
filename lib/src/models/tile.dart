@@ -2,6 +2,7 @@
 library;
 
 import 'tiled_object.dart';
+import 'tiled_properties.dart';
 
 /// A single animation frame for animated tiles.
 class AnimationFrame {

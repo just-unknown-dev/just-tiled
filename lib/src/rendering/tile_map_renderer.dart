@@ -23,6 +23,9 @@ import 'texture_atlas.dart';
 /// other orientations draw right-down). Finite and infinite (chunked) layers
 /// are drawn alike.
 ///
+/// A renderer owns only its buffers: it disposes nothing. Dispose each
+/// [TextureAtlas] once, when every renderer that draws from it is done.
+///
 /// Usage:
 /// ```dart
 /// final renderer = TileMapRenderer(
@@ -31,7 +34,7 @@ import 'texture_atlas.dart';
 ///   atlas: textureAtlas,
 /// );
 /// renderer.compile();
-/// renderer.render(canvas, cameraOffset, visibleBounds);
+/// renderer.render(canvas, visibleBounds);
 /// ```
 class TileMapRenderer {
   /// The tile layer to render.
@@ -242,8 +245,8 @@ class TileMapRenderer {
       final found = <(int, int, int)>[];
       for (final chunk in tileLayer.chunks) {
         if (chunk.width <= 0) continue;
-        for (var i = 0; i < chunk.data.length; i++) {
-          final raw = chunk.data[i];
+        for (var i = 0; i < chunk.gids.length; i++) {
+          final raw = chunk.gids[i];
           final id = TiledGid.idOf(raw);
           if (id == 0 || !_drawable(id)) continue;
           found.add((
@@ -269,20 +272,21 @@ class TileMapRenderer {
 
     final width = tileLayer.width;
     final height = tileLayer.height;
-    final length = tileLayer.data.length;
+    final gids = tileLayer.gids;
     if (width <= 0) return out;
     for (var r = 0; r < height; r++) {
       final row = up ? height - 1 - r : r;
       for (var c = 0; c < width; c++) {
         final col = left ? width - 1 - c : c;
         final index = row * width + col;
-        if (index >= length) continue;
-        final id = tileLayer.data[index];
-        if (id <= 0 || !_drawable(id)) continue;
+        if (index >= gids.length) continue;
+        final raw = gids[index];
+        final id = TiledGid.idOf(raw);
+        if (id == 0 || !_drawable(id)) continue;
         out
           ..add(col)
           ..add(row)
-          ..add(tileLayer.rawGidAt(index));
+          ..add(raw);
       }
     }
     return out;
@@ -315,16 +319,12 @@ class TileMapRenderer {
   /// Render the tile layer.
   ///
   /// [canvas] is the Flutter canvas, already translated to the camera:
-  /// `render` moves it only by the layer's offset. [cameraOffset] is not
-  /// used. [visibleBounds] is the visible world-space rectangle; tiles
-  /// outside it are skipped. Pass null to draw every tile.
+  /// `render` moves it only by the layer's offset. [visibleBounds] is the
+  /// visible world-space rectangle; tiles outside it are skipped. Pass null
+  /// to draw every tile.
   ///
   /// Draws with one `drawRawAtlas` call, in the map's render order.
-  void render(
-    ui.Canvas canvas,
-    ui.Offset cameraOffset,
-    ui.Rect? visibleBounds,
-  ) {
+  void render(ui.Canvas canvas, ui.Rect? visibleBounds) {
     if (_dirty) compile();
     if (_count == 0) return;
 
@@ -557,17 +557,10 @@ class TileMapRenderer {
     }
   }
 
-  /// Mark buffers as needing recompilation.
+  /// Mark buffers as needing recompilation: call it after changing the
+  /// layer's tiles in place ([TileLayer.gids], or a chunk's). The next
+  /// `render` compiles again.
   void invalidate() {
     _dirty = true;
-  }
-
-  /// Dispose the underlying [TextureAtlas] image resource.
-  ///
-  /// Call this when the renderer is no longer needed to release the GPU
-  /// texture held by [atlas]. Renderers that share an atlas must not call
-  /// it: dispose the atlas itself, once.
-  void dispose() {
-    atlas.dispose();
   }
 }

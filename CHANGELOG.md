@@ -1,5 +1,47 @@
 # Changelog
 
+## [0.5.0] - 2026-11-05
+
+Requires `just_zstd` ^0.3.0 (was ^0.2.0) and adds `meta` ^1.15.0.
+
+### Breaking
+- **Renamed**, so every reader, writer and provider is named for what it handles:
+  - `TileMapParser` → `TmxParser` (now an `abstract final class`, like `TmjParser`);
+  - `TsxProvider` → `TiledFileProvider`, with `getTsx` → `loadTileset` and `getTemplate` → `loadTemplate`;
+  - `DefaultTsxProvider` → `AssetTiledFileProvider`;
+  - the readers' `tsxProvider:` parameter → `fileProvider:` (`TmxParser.parse`, `TmjParser.parse`, `TmjParser.parseMap`);
+  - `TmxDataEncoding` → `TiledDataEncoding`, now taken by both writers.
+- **A tile layer stores its tiles once.** `TileLayer.data`, `flipHorizontal`, `flipVertical`, `flipDiagonal`, `rawData`, `rawGidAt` and `rawGids` are replaced by `TileLayer.gids`, a `Uint32List` of raw ids with every flag, and `idAt(index)`, the id without flags. A layer took about 36 bytes a cell in five lists; it takes 4. `TileLayer`'s constructor takes `gids:` and is no longer `const`.
+- `TileChunk.data` → `TileChunk.gids`, the same raw ids.
+- `TmjWriter.write` and `toJson` take `encoding: TiledDataEncoding` (csv, base64, base64Zlib, base64Gzip) instead of `base64Zlib: bool`.
+- `TileMapRenderer.render(canvas, cameraOffset, visibleBounds)` → `render(canvas, visibleBounds)`: the camera offset was never used.
+- `TileMapParser.parseWangId` is private: it was a parsing helper.
+
+### Added
+- `TiledObject.template`: the template's object, as loaded.
+- `TileLayer.idAt`.
+- `TmjWriter` writes uncompressed base64 and gzip, as `TmxWriter` does.
+
+### Changed
+- **The layout.** `lib/src` is split by feature, in layers: `models/`, then `files/` (the file provider, and the paths, tile data and colour notation both formats share), then `formats/` (`tmx/` and `tmj/`) and `rendering/`, each with one barrel. Internal helpers are `@internal`. The loop between the old `json/` and `parser/` folders is gone; what is left, `tmx/` and `tmj/` using each other's tilesets and templates, is inside `formats/`. `test/library_layout_test.dart` checks it. Files moved: `models/enums.dart` → `tiled_enums.dart`, `gid.dart` → `tiled_gid.dart`, `layer.dart` → `map_layers.dart`, `wang.dart` → `wang_set.dart`, and `TiledProperties` has a file of its own, `tiled_properties.dart`.
+- The colour notation is read by one function for both readers.
+- The library doc and pubspec description say what the package is: Tiled files, read and written, and drawn; no engine.
+
+### Fixed
+- **Maps Tiled saves with Zstandard-compressed layers load.** `just_zstd` 0.2.0 read only uncompressed Zstandard blocks, so every layer Tiled saves as "Base64 (Zstandard compressed)" was refused with a `FormatException` that blamed the file. `just_zstd` 0.3.0 decodes the whole format, and is held to the layer's size: hostile data that would unpack to more is refused as soon as it passes it, before the memory is taken.
+- **TMJ maps load object templates.** A templated object in a TMJ map lost everything its template gave it (type, tile, size, properties). Both readers now load each template once per map through the file provider, as TX or TJ, and renumber its tile for the map.
+- **Writing a map no longer cuts objects from their templates.** The writers wrote everything an object inherited as its own, so after saving, the objects stopped following their template in Tiled. `TiledObject.template` keeps the template's object, and both writers give back only what the object sets itself, as Tiled writes it.
+- **Tile data must hold exactly its layer's tiles.** CSV, XML, uncompressed base64 and TMJ arrays were taken at any length, so a layer could come back short and fail later with a `RangeError`. A finite layer's data must now hold `width × height` ids and each chunk its own size, or the reader throws `FormatException`. A finite layer with no data is all empty cells; an infinite map's layer may have no chunks.
+- An object's own shape replaces its template's: an instance made a polygon is no longer also an ellipse.
+
+### Removed
+- `TileMapRenderer.dispose()`. It disposed the renderer's atlas, and with it the image, which renderers share. A renderer owns nothing to dispose: dispose each `TextureAtlas` once (it owns its image), or a `TextureAtlasCollection`.
+- `SpatialHashGrid`, moved to `just_dart` 0.3.0 (`package:just_dart/just_dart.dart`). Nothing here used it.
+
+### Tests
+- 169: the tests mirror `lib/src` (`test/models/`, `files/`, `formats/`, `formats/tmx/`, `formats/tmj/`, `rendering/`), plus the layout guard. New: maps Tiled 1.11.2 saved with Zstandard layers (TMX and TMJ, 40 × 30 and a two-block 256 × 160, an infinite map's chunks), a Zstandard RLE bomb refused at the layer size, TMJ and TJ templates, objects written back as their overrides, tile data of the wrong length in every encoding, every writer encoding in TMJ, `invalidate()` after changing tiles in place, and `TextureAtlasCollection`. The `SpatialHashGrid` tests went with it to `just_dart`.
+
+---
 ## [0.4.1] - 2026-10-15
 
 ### Fixed

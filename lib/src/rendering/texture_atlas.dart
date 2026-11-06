@@ -8,8 +8,11 @@ import '../models/models.dart';
 /// Maps global tile IDs (GIDs) to source rectangles within a tileset image.
 ///
 /// For multi-tileset maps, create one [TextureAtlas] per tileset image.
+///
+/// An atlas owns its [image]: [dispose] disposes it. Any number of
+/// renderers may draw from one atlas; dispose it once, after them.
 class TextureAtlas {
-  /// The tileset image.
+  /// The tileset image, which this atlas owns.
   final ui.Image image;
 
   /// The tileset metadata.
@@ -21,7 +24,8 @@ class TextureAtlas {
   /// [image] and its mirror image, made on first use.
   ui.Image? _mirrored;
 
-  /// Create a texture atlas for the given [tileset] and its loaded [image].
+  /// Create a texture atlas for the given [tileset] and its loaded [image],
+  /// which the atlas takes over: don't dispose it yourself.
   TextureAtlas({required this.image, required this.tileset}) {
     _precomputeRects();
   }
@@ -115,6 +119,7 @@ class TextureAtlas {
   }
 
   /// Dispose the image resources: [image], and [mirroredImage] if made.
+  /// Call it once, when no renderer draws from this atlas any more.
   void dispose() {
     image.dispose();
     _mirrored?.dispose();
@@ -156,7 +161,7 @@ class TextureAtlasCollection {
     return null;
   }
 
-  /// Dispose all atlas images.
+  /// Dispose every atlas, and so its images: the collection owns them.
   void dispose() {
     for (final atlas in _atlases) {
       atlas.dispose();

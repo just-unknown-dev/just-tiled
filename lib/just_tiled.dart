@@ -1,8 +1,8 @@
-/// Tiled Map Editor integration for just_game_engine.
+/// Read and write Tiled files (TMX, TSX, TX; TMJ, TSJ, TJ) and draw their
+/// tile layers with `Canvas.drawRawAtlas`.
 ///
-/// Provides robust, hardware-accelerated support for the Tiled Map Editor
-/// (TMX/TSX formats). This package is standalone and does not depend on
-/// just_game_engine — ECS integration is provided by the engine itself.
+/// No game-engine dependency: `just_game_engine` uses it for its Tiled
+/// import and export.
 ///
 /// ## Quick Start
 ///
@@ -11,7 +11,10 @@
 ///
 /// // Parse a TMX file
 /// final tmxXml = await rootBundle.loadString('assets/maps/level1.tmx');
-/// final map = await TileMapParser.parse(tmxXml);
+/// final map = await TmxParser.parse(
+///   tmxXml,
+///   fileProvider: const AssetTiledFileProvider(basePath: 'assets/maps'),
+/// );
 ///
 /// // Access tile layers
 /// for (final layer in map.tileLayers) {
@@ -20,20 +23,14 @@
 /// ```
 library;
 
-// Data models
+// The models every reader produces and every writer takes.
 export 'src/models/models.dart';
 
-// TMX parser
-export 'src/parser/parser.dart';
+// Where external tilesets and templates come from.
+export 'src/files/files.dart';
 
-// TMX / TSX writers
-export 'src/writer/tmx_writer.dart';
+// TMX and TMJ, read and written.
+export 'src/formats/formats.dart';
 
-// TMJ / TSJ (Tiled's JSON formats), read and written
-export 'src/json/tmj_codec.dart';
-
-// Rendering pipeline
+// Drawing tile layers.
 export 'src/rendering/rendering.dart';
-
-// Spatial optimization
-export 'src/spatial/spatial.dart';

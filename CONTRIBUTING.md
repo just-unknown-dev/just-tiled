@@ -91,7 +91,7 @@ When opening a bug report, include:
 
 | Tool | Minimum version |
 |------|----------------|
-| Flutter | >=1.17.0 |
+| Flutter | >=3.41.0 |
 | Dart SDK | ^3.11.0 |
 
 The repository is a **Flutter package**.
